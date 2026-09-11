@@ -1,6 +1,6 @@
 # Executed acceptance results
 
-The September 2026 local-GPU request extends the previously verified browser application. Status applies only to the named layer. Protocol fixtures, desktop browsers, worker benchmarks and earlier releases do not prove physical-phone or cloud operation. All listed local checks, including real GPU E2E and split HTTPS/WSS smoke, passed. Publication and frontend redeployment are pending.
+The September 2026 local-GPU request extends the previously verified browser application. Status applies only to the named layer. Protocol fixtures, desktop browsers, worker benchmarks and earlier releases do not prove physical-phone or cloud operation. All listed local checks, including real GPU E2E and split HTTPS/WSS smoke, passed. Application source is published at cda1d9692e1c2fdb6b3cbf3095e51591103afa5d; the updated frontend is Ready and public smoke passed 1/1 in 9.0 seconds.
 
 ## Existing application requirements
 
@@ -20,7 +20,7 @@ The September 2026 local-GPU request extends the previously verified browser app
 | T29 | Real GPU combined-server restart passed: three local reports preserved, unavailable model assets caused visible fallback-load failure/pause, and explicit Resume after restoration succeeded. Old pairing expired immediately with close code 1008 and viewer state cleared. Automatic fallback during asset outage is not claimed. Deployed-provider restart remains not run. |
 | T30 | Existing owner grace/reconnect/stale clearing passed. GPU worker loss transitioned to actual WASM and explicit worker retry returned to GPU in the current browser run. Connection-generation/cancel fencing has dedicated worker/relay tests. |
 | T31 | Masked current GPU screenshots at 390-pixel mobile width and 1440-pixel desktop width were inspected. Prior browser layout checks and native dialog focus behavior remain documented. Physical touch/accessibility checks are not verified. |
-| T32 | Vercel/Render/single-service configurations are prepared. Current compiled same-origin paired smoke passed 1/1 in 17.1 seconds and split HTTPS/WSS smoke passed 1/1 in 20.3 seconds. Existing https://roadlens-ai-five.vercel.app is frontend-only; current GPU publication/redeployment are pending and no cloud relay or GPU worker connection exists. |
+| T32 | Vercel/Render/single-service configurations are prepared. Current compiled same-origin paired smoke passed 1/1 in 17.1 seconds and split HTTPS/WSS smoke passed 1/1 in 20.3 seconds. Existing https://roadlens-ai-five.vercel.app is frontend-only; updated source is published and the frontend-only public smoke passed 1/1 in 9.0 seconds; no cloud relay or production GPU worker connection exists. |
 | T33 | Partial: provider settings inspected read-only and application byte caps tested. Render creation remains blocked because the authorized account permits billable overages. Worker egress joins the same application caps; they are not a provider billing guarantee. |
 | T34–T35 | Not verified: physical phone, cellular/second-network, sustained performance, thermal and memory behavior. Worker-only timing is not phone throughput. |
 | T36 | Unmeasured: no field ground-truth speed dataset or error statistics. |
@@ -64,7 +64,7 @@ The September 2026 local-GPU request extends the previously verified browser app
 | Synthetic training safeguards | 21 passed in 0.133 seconds; no training ran. |
 | Secret scan | Gitleaks 8.30.1: no leaks in 149 public text files. |
 
-All listed local release checks passed. Ports 5173, 10000, 10002 and 10006 were not listening after verification. Publication and frontend redeployment remain pending; cloud relay/GPU, physical-phone and field-accuracy gates remain unresolved independently.
+All listed local release checks passed. Ports 5173, 10000, 10002 and 10006 were not listening after verification. Source publication and updated frontend smoke passed; cloud relay/GPU, physical-phone and field-accuracy gates remain unresolved independently.
 
 docs/evidence/gpu-browser-pipeline.json records the successful 2026-09-11T03:23:02Z run. At 640 pixels, 36 measured frames averaged 17.84 ms WebSocket result round trip excluding encoding, 8.97 ms inference and 13.94 ms worker processing. At 960 pixels, 26 frames averaged 20.29 ms round trip, 9.86 ms inference and 17.75 ms worker processing. Camera snapshots recorded result rates 9.397/7.930 Hz, source rates 14.94/14.83 Hz, processing times 27.2/42.7 ms and frame ages 21.5/36.5 ms respectively. These are short local replay measurements, not sustained phone/network performance or one-way latency.
 

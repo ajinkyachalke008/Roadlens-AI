@@ -10,7 +10,7 @@ Initial clean main: `5917cb24d8c6540ce8f4649dafd8b46a55968e64`. The latest reque
 | P3–P5 browser integration | Full real GPU browser acceptance passed 1/1 in 22.5 seconds: actual camera-page replay, relay, CUDA, matching frames, paired viewer, report/review, 640/960 profiles, worker loss and restart, WASM fallback, relay restart, preserved reports and End cleanup. |
 | P6 launcher | `npm run test:start` passes from a nonproject directory: two invalid configurations fail safely; real CUDA warmup and registration; genuine Windows Ctrl+C stops all owned descendants and clears the relay socket. |
 | P7 setup/benchmark | Cached setup passes from another directory. Six five-run checks and the separate six-model/runtime 20-run benchmark completed. TensorRT did not produce an engine within five minutes; unverified and unselected. |
-| P8 cloud | Existing Vercel frontend only. Render creation remains blocked by the prior strict no-overage condition. No production GPU connection or full cloud smoke. |
+| P8 cloud | Updated application source cda1d9692e1c2fdb6b3cbf3095e51591103afa5d is published. Vercel frontend verified Ready/Production, 20-second build, 19 static assets; public browser smoke passed 1/1 in 9.0 seconds. Render creation remains blocked by the prior strict no-overage condition. No production GPU connection or full cloud smoke. |
 | P9 device/field | Physical phone, cellular/second-network and sustained thermal behavior not verified. Field-speed accuracy unmeasured. |
 | P10 optional | Plate/OCR and wrong-way disabled. Custom training not run. |
 

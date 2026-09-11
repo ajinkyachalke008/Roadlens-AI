@@ -15,19 +15,19 @@ The new request supersedes the earlier local-worker prohibition. It does not aut
 | Current automated suites | 124 unit, 49 contract, 61 real relay, 11 browser-model and ten E2E/privacy scenarios passed. Build/lint/typecheck, compiled same-origin and split HTTPS/WSS smokes passed. |
 | Calibrated speed logic | Deterministic geometry, source-time tracking, invalid-state gates and candidate persistence tested. |
 | Real-field speed accuracy | Unmeasured: no independent ground-truth trial or error statistics. |
-| Cloud deployment | Existing frontend only. No deployed relay or production worker connection. |
-| Cloud smoke | Previous frontend-only smoke passed; full paired cloud/GPU smoke and provider restart not run. |
+| Cloud deployment | Updated Vercel frontend is Ready/Production on Hobby. No deployed relay or production worker connection. |
+| Cloud smoke | Current frontend-only smoke passed 1/1 in 9.0 seconds; full paired cloud/GPU smoke and provider restart not run. |
 | Physical phone | Not verified: rear camera, cellular/second-network and sustained thermal behavior remain untested. |
 | Free-plan constraints | Relay creation blocked: authorized Render account permits billable overages, contrary to the prior strict no-overage condition. |
 | Optional features | OCR and wrong-way disabled; custom training not run; TensorRT unverified and unselected. |
 
 ## Deployment and source
 
-Existing public frontend: https://roadlens-ai-five.vercel.app. Public application repository: https://github.com/kokoc30/roadlens-ai. These identify the previously published application; they do not establish deployment or publication of the current GPU changes. A final source SHA is recorded only after the integrator verifies the release.
+Public frontend: https://roadlens-ai-five.vercel.app. Public application repository: https://github.com/kokoc30/roadlens-ai. GPU application source was committed and pushed to main at `cda1d9692e1c2fdb6b3cbf3095e51591103afa5d`. Subsequent documentation-only commits seal observed release evidence; no history was rewritten. Original private instruction packs, user configuration and generated GPU caches remain excluded and preserved locally.
 
-Current GPU publication and frontend redeployment remain pending. The release scan with Gitleaks 8.30.1 found no leaks in 149 public text files.
+Vercel deployment `54cGHoj5eVufwtUxHjt2nBRHpJxk` was verified Ready/Production against that source SHA, with a 20-second build, the existing production domain and 19 static assets; no functions, analytics or paid services were added. GitHub's Vercel status also reported success. Gitleaks 8.30.1 found no leaks in 149 public text files and the three-commit history scan.
 
-The existing Vercel Hobby build is frontend-only with VITE_SHARING_DISABLED=true. Camera/replay and local reports work there; Share/Connect and GPU mode must not be presented as deployed. Its previous public smoke passed 1/1 in 9.2 seconds: actual 416/320 inference, local reports/downloads, cleanup, HTTPS model/runtime hashes and MIME, missing-asset 404s and absence of unexpected API requests. Local development services were stopped. This evidence predates the GPU extension.
+The Vercel Hobby build remains frontend-only with VITE_SHARING_DISABLED=true. Camera/replay and local reports work there; Share/Connect and GPU mode are not deployed. The current public smoke passed 1/1 in 9.0 seconds: actual 416/320 inference, local reports/downloads, cleanup, HTTPS model/runtime hashes and MIME, missing-asset 404s, no unexpected API requests and zero page/console errors. Local development services were stopped. This verifies the updated public browser fallback, not a public GPU path.
 
 Vercel static and Render Free relay configurations and the single-Render fallback are prepared. No relay URL has been invented, no cloud Python/GPU service was created, and billing settings were not changed. Deployment needs an authorized workspace satisfying the existing no-overage constraint.
 
@@ -74,7 +74,7 @@ The clean 20-run benchmark measured balanced PyTorch CUDA at median 7.40 ms infe
 | Current full GPU E2E | Passed 1/1 in 22.5 seconds total, 18.6 seconds test time. Actual browser/relay/CUDA, 640/960 sampling, viewer review, worker loss→WASM, worker restart→explicit GPU, combined-server restart→preserved reports/visible pause/Resume, old-pairing expiry and End RAM cleanup all passed. Browser console errors: zero. |
 | Training safeguards | 21 synthetic tests passed in 0.133 seconds. No actual training ran. |
 | Secret scan | Gitleaks 8.30.1: no leaks in 149 public text files. |
-| Remaining release work | All listed local release checks passed. Publication and frontend redeployment are pending; cloud/phone/field gates remain separate. |
+| Publication | Application source pushed; updated Vercel frontend and current public smoke passed. Cloud relay/GPU, physical-phone and field gates remain separate. |
 
 After local verification, ports 5173, 10000, 10002 and 10006 were not listening. This confirms cleanup of the checked local test services, not deployment of a cloud relay.
 
@@ -113,7 +113,7 @@ Numeric speed requires a fixed, approximately planar, measured setup, independen
 
 Real-field accuracy is unmeasured: no ground-truth sample, MAE, median error or maximum error exists. MEASUREMENT_RELEASE_AUDIT.md provides a safe controlled evaluation protocol recording attempted passes and unavailable coverage without encouraging unsafe driving.
 
-OCR/plates and wrong-way remain disabled. No consented readable-plate evaluation, successful integrated OCR test or complete controlled wrong-way workflow exists. Custom training has not run; 21 earlier synthetic training safeguards do not establish training or accuracy. The pretrained application needs no training dataset.
+OCR/plates and wrong-way remain disabled. No consented readable-plate evaluation, successful integrated OCR test or complete controlled wrong-way workflow exists. Custom training has not run; 21 freshly rerun synthetic training safeguards do not establish training or accuracy. The pretrained application needs no training dataset.
 
 ## Commands and remaining actions
 

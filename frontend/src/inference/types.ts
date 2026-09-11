@@ -53,8 +53,8 @@ export interface DetectionResult {
   inferenceMs: number;
   modelId: string;
   modelSha256: string;
-  profile: 416 | 320;
-  executionProvider: "wasm";
+  profile: 416 | 320 | 640;
+  executionProvider: "wasm" | "pytorch_cuda" | "onnx_cuda" | "tensorrt";
 }
 export interface LoadProgress {
   loaded: number;

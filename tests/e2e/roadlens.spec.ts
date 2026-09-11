@@ -12,6 +12,76 @@ import { decodePacket } from "../../shared/src/packets";
 import type { PacketHeader } from "../../shared/src/schemas";
 import { localTlsAllowed } from "./localTls";
 
+test("GPU preparation privacy: delayed status cannot resume after Pause or hidden-page loss", async ({
+  browser,
+}) => {
+  const { context, page, errors } = await pageFor(browser);
+  await startReplay(page);
+  for (const action of ["pause", "hidden"] as const) {
+    let entered!: () => void, release!: () => void;
+    const waiting = new Promise<void>((resolve) => {
+      entered = resolve;
+    });
+    const held = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    await page.route("**/api/config", async (route) => {
+      const response = await route.fetch();
+      entered();
+      await held;
+      await route.fulfill({ response });
+    });
+    await page
+      .getByLabel("Choose replay video")
+      .setInputFiles({
+        name: "permitted-bus-still-photo.webm",
+        mimeType: "video/webm",
+        buffer: replay,
+      });
+    await waiting;
+    if (action === "pause")
+      await page
+        .getByRole("button", { name: "Pause camera", exact: true })
+        .click();
+    else
+      await page.evaluate(() => {
+        Object.defineProperty(document, "hidden", {
+          configurable: true,
+          get: () => true,
+        });
+        document.dispatchEvent(new Event("visibilitychange"));
+      });
+    release();
+    await expect(
+      page.getByRole("button", { name: "Resume camera", exact: true }),
+    ).toBeVisible();
+    await page.waitForTimeout(1800);
+    expect(
+      await page
+        .locator("video")
+        .evaluate((e) => (e as HTMLVideoElement).paused),
+    ).toBe(true);
+    await expect(page.getByTestId("analyzed-frame")).not.toBeVisible();
+    await page.unroute("**/api/config");
+    if (action === "hidden")
+      await page.evaluate(() => {
+        Object.defineProperty(document, "hidden", {
+          configurable: true,
+          get: () => false,
+        });
+      });
+    else {
+      await page
+        .getByRole("button", { name: "Resume camera", exact: true })
+        .click();
+      await expect(page.getByTestId("analyzed-frame")).toBeVisible();
+    }
+  }
+  expect(errors).toEqual([]);
+  await boundedPrivacy(page);
+  await context.close();
+});
+
 type Trace = {
   writes: string[];
   media: MediaStreamConstraints[];
@@ -776,7 +846,7 @@ test("Release privacy: source-only reconnect replaces full snapshots, stop shari
     ).toBe(true);
     phase = "restore source connection and compare complete snapshot";
     blockSource = false;
-    await expect(camera.page.locator(".page-heading .badge")).toHaveText(
+    await expect(camera.page.getByTestId("connection-state")).toHaveText(
       "Connected",
       { timeout: 15_000 },
     );

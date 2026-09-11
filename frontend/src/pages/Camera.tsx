@@ -4,6 +4,7 @@ import { SessionStore } from "../session/store";
 import {
   RelayClient,
   api,
+  apiBase,
   sharingAvailable,
   type Room,
   type ServerMessage,
@@ -18,6 +19,7 @@ import { Reports } from "../components/Reports";
 import { Drawer } from "../components/Drawer";
 import { CalibrationDrawer } from "../components/CalibrationDrawer";
 import { speedFactor, type SpeedUnit } from "../components/speedUnits";
+import { RemoteDetector } from "../inference/remote";
 export default function Camera() {
   const video = useRef<HTMLVideoElement>(null);
   const capture = useRef<CameraCapture | null>(null);
@@ -39,6 +41,11 @@ export default function Camera() {
   const evidenceRef = useRef(false);
   const [profile, setProfile] = useState<416 | 320>(416);
   const [adaptiveNote, setAdaptiveNote] = useState("");
+  const [inferenceMode, setInferenceMode] = useState("Browser AI");
+  const [preferGpu, setPreferGpu] = useState(true);
+  const [gpuConnecting, setGpuConnecting] = useState(false);
+  const [analysisEdge, setAnalysisEdge] = useState<640 | 960>(640);
+  const gpuAttempt = useRef(0);
   const [speedUnit, setSpeedUnit] = useState<SpeedUnit>("mph");
   const [previewHz, setPreviewHz] = useState(0);
   const [clock, setClock] = useState(Date.now());
@@ -87,6 +94,8 @@ export default function Camera() {
     if (m.type === "sharing.budget" || m.type === "hello.ok")
       setRemaining(Number(m.roomBytesRemaining));
     if (m.type === "room.ended") {
+      if (capture.current?.remote)
+        void capture.current.useBrowser("Sharing ended · Browser fallback");
       if (m.reason === "sharing_budget_exhausted")
         setError(
           "Sharing stopped: relay byte allowance exhausted. Local analysis continues.",
@@ -183,6 +192,7 @@ export default function Camera() {
     store.onReport = (report) =>
       relay.current?.send({ v: 2, type: "report.upsert", report });
     c.onError = setError;
+    c.onInferenceMode = setInferenceMode;
     c.onProfile = (next, automatic) => {
       setProfile(next);
       setAdaptiveNote(
@@ -294,6 +304,11 @@ export default function Camera() {
     const pagehide = () => {
       shareAbort.current?.abort();
       lifecycle.current++;
+      gpuAttempt.current++;
+      setGpuConnecting(false);
+      setPreferGpu(true);
+      setAnalysisEdge(640);
+      setInferenceMode("Browser AI");
       setSharing(false);
       c.end();
       relay.current?.close();
@@ -360,7 +375,99 @@ export default function Camera() {
   }, [store]);
   async function start(file?: File | null) {
     setError("");
-    await capture.current?.start(profile, file);
+    const life = lifecycle.current;
+    capture.current?.pause(false);
+    const version = capture.current?.operationVersion;
+    const current = () =>
+      life === lifecycle.current &&
+      version === capture.current?.operationVersion &&
+      mounted.current &&
+      !document.hidden;
+    let remote: RemoteDetector | undefined;
+    if (preferGpu && sharingAvailable()) {
+      // One bounded read on a user action; no idle polling or anti-sleep traffic.
+      try {
+        const response = await fetch(apiBase() + "/api/config", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ v: 2 }),
+          cache: "no-store",
+          signal: AbortSignal.timeout(1500),
+        });
+        const config = response.ok ? await response.json() : null;
+        if (!current()) return;
+        if (config?.gpu?.state === "ready") remote = await prepareGpu(current);
+        else
+          setInferenceMode(
+            config?.gpu?.state === "busy"
+              ? "GPU busy · Browser fallback"
+              : "Browser AI",
+          );
+      } catch {
+        setInferenceMode("Browser AI");
+      }
+    }
+    if (!current()) {
+      remote?.close();
+      return;
+    }
+    await capture.current?.start(profile, file, remote);
+  }
+  async function prepareGpu(current: () => boolean) {
+    if (!sharingAvailable()) return;
+    const attempt = ++gpuAttempt.current;
+    const life = lifecycle.current;
+    setGpuConnecting(true);
+    let remote: RemoteDetector | undefined;
+    try {
+      if (!roomRef.current) await share();
+      const deadline = performance.now() + 5000;
+      while (
+        !relay.current?.connected &&
+        performance.now() < deadline &&
+        life === lifecycle.current &&
+        attempt === gpuAttempt.current &&
+        current()
+      )
+        await new Promise((resolve) => setTimeout(resolve, 50));
+      if (
+        !roomRef.current ||
+        !relay.current?.connected ||
+        life !== lifecycle.current ||
+        attempt !== gpuAttempt.current ||
+        !current()
+      )
+        throw new Error("Relay unavailable");
+      remote = new RemoteDetector(roomRef.current, analysisEdge);
+      await remote.connect();
+      if (
+        life !== lifecycle.current ||
+        attempt !== gpuAttempt.current ||
+        !mounted.current ||
+        !current()
+      ) {
+        remote.close();
+        return;
+      }
+      return remote;
+    } catch {
+      remote?.close();
+      if (life === lifecycle.current)
+        setInferenceMode("GPU unavailable · Browser fallback");
+    } finally {
+      if (attempt === gpuAttempt.current) setGpuConnecting(false);
+    }
+  }
+  async function activateGpu() {
+    setPreferGpu(true);
+    const version = capture.current?.operationVersion;
+    const current = () =>
+      version === capture.current?.operationVersion &&
+      mounted.current &&
+      !document.hidden;
+    const remote = await prepareGpu(current);
+    if (remote && current()) capture.current?.useGpu(remote);
+    else remote?.close();
   }
   async function share() {
     if (sharing || roomRef.current) return;
@@ -422,6 +529,10 @@ export default function Camera() {
   async function stopSharing() {
     shareAbort.current?.abort();
     lifecycle.current++;
+    gpuAttempt.current++;
+    setGpuConnecting(false);
+    if (capture.current?.remote)
+      void capture.current.useBrowser("Sharing stopped · Browser fallback");
     setSharing(false);
     const r = roomRef.current;
     roomRef.current = null;
@@ -467,7 +578,14 @@ export default function Camera() {
           <span className="eyebrow">SOURCE DEVICE</span>
           <h1>Camera</h1>
         </div>
-        <span className="badge">{connection}</span>
+        <div className="actions">
+          <span className="badge" data-testid="inference-mode">
+            {gpuConnecting ? "GPU AI · Connecting" : inferenceMode}
+          </span>
+          <span className="badge" data-testid="connection-state">
+            {connection}
+          </span>
+        </div>
       </div>
       <video ref={video} className="capture-source" aria-hidden="true" />
       <Stage frame={frame} status={status} speedUnit={speedUnit} />
@@ -476,7 +594,7 @@ export default function Camera() {
           <button
             className="primary"
             onClick={() => (running ? capture.current?.pause() : void start())}
-            disabled={loading}
+            disabled={loading || gpuConnecting}
           >
             {running
               ? "Pause camera"
@@ -616,6 +734,119 @@ export default function Camera() {
       )}
       {drawer === "settings" && (
         <Drawer title="Camera settings" onClose={() => setDrawer(null)}>
+          <h3>Inference</h3>
+          <label>
+            GPU analysis image
+            <select
+              value={analysisEdge}
+              disabled={running || loading}
+              onChange={(e) =>
+                setAnalysisEdge(Number(e.target.value) as 640 | 960)
+              }
+            >
+              <option value="640">640 · lower bandwidth</option>
+              <option value="960">960 · more detail</option>
+            </select>
+          </label>
+          <label className="check">
+            <input
+              type="checkbox"
+              checked={preferGpu}
+              onChange={(e) => setPreferGpu(e.target.checked)}
+            />
+            Prefer available GPU on start
+          </label>
+          <div className="actions">
+            <button
+              disabled={
+                !running ||
+                gpuConnecting ||
+                !!capture.current?.remote ||
+                !sharingAvailable()
+              }
+              onClick={() => void activateGpu()}
+            >
+              Use GPU worker
+            </button>
+            <button
+              disabled={!capture.current?.remote}
+              onClick={() => {
+                setPreferGpu(false);
+                void capture.current?.useBrowser();
+              }}
+            >
+              Use browser AI
+            </button>
+          </div>
+          <p className="footnote">
+            GPU mode sends bounded analysis images to your connected worker,
+            even without viewers. Switching clears tracking and calibration.
+            Browser fallback stays available.
+          </p>
+          {capture.current?.gpuDiagnostics &&
+            (() => {
+              const d = capture.current.gpuDiagnostics!;
+              return (
+                <dl
+                  className="gpu-diagnostics"
+                  data-testid="gpu-diagnostics"
+                  data-source-hz={d.sourceHz}
+                  data-submitted-hz={d.submittedHz}
+                  data-result-hz={d.resultHz}
+                  data-result-age-ms={d.resultAgeMs}
+                  data-processing-ms={
+                    capture.current?.latest?.processingMs ?? 0
+                  }
+                  data-tracking-ms={d.trackingMs}
+                >
+                  <dt>Model / runtime</dt>
+                  <dd>
+                    {capture.current.remote?.descriptor?.modelId} /{" "}
+                    {capture.current.remote?.descriptor?.runtime}
+                  </dd>
+                  <dt>Frames submitted / completed / skipped</dt>
+                  <dd>
+                    {d.submitted} / {d.completed} /{" "}
+                    {d.skippedFrames + d.dropped}
+                  </dd>
+                  <dt>Encoding / same-clock result age</dt>
+                  <dd>
+                    {d.encodeMs.toFixed(1)} / {d.resultAgeMs.toFixed(1)} ms
+                  </dd>
+                  <dt>Source / submitted / completed</dt>
+                  <dd>
+                    {d.sourceHz.toFixed(1)} / {d.submittedHz.toFixed(1)} /{" "}
+                    {d.resultHz.toFixed(1)} Hz
+                  </dd>
+                  <dt>Relay round trip</dt>
+                  <dd>{d.rttMs?.toFixed(1) ?? "—"} ms</dd>
+                  <dt>Decode / preprocess / inference / postprocess</dt>
+                  <dd>
+                    {d.worker
+                      ? [
+                          d.worker.decodeMs,
+                          d.worker.preprocessMs,
+                          d.worker.inferenceMs,
+                          d.worker.postprocessMs,
+                        ]
+                          .map((n) => n.toFixed(1))
+                          .join(" / ")
+                      : "—"}{" "}
+                    ms
+                  </dd>
+                  <dt>Worker total / target submission</dt>
+                  <dd>
+                    {d.worker?.totalMs.toFixed(1) ?? "—"} ms /{" "}
+                    {(1000 / d.intervalMs).toFixed(1)} Hz
+                  </dd>
+                  <dt>Camera tracking</dt>
+                  <dd>{d.trackingMs.toFixed(2)} ms</dd>
+                  <dt>Analysis sent / in-flight limit</dt>
+                  <dd>{(d.bytes / 1048576).toFixed(2)} MiB / 1</dd>
+                </dl>
+              );
+            })()}
+          <hr />
           <label>
             Detector profile
             <select
@@ -777,6 +1008,9 @@ export default function Camera() {
               setSpeedUnit("mph");
               setProfile(416);
               setAdaptiveNote("");
+              setPreferGpu(true);
+              setAnalysisEdge(640);
+              setInferenceMode("Browser AI");
               setPreviewHz(0);
               uploads.current = [];
               lastPreview.current = 0;

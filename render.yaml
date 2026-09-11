@@ -18,6 +18,8 @@ services:
         sync: false
       - key: SERVE_WEB
         value: "false"
+      - key: ROADLENS_WORKER_SECRET
+        sync: false
       - key: ROOM_EGRESS_BYTES
         value: 134217728
       - key: PROCESS_EGRESS_BYTES

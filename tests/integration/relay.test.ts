@@ -173,6 +173,49 @@ function packet(seq = 1, epoch = "b6ac502f-4554-4b57-8802-1b5e98db4678") {
 }
 
 describe("B10/B11/B44 RAM relay protocol", () => {
+  it("accepts the strict browser config POST without weakening Origin checks", async () => {
+    const f = await fixture({ limits: { rooms: 2 } });
+    const response = await f.request("/api/config", { v: 2 });
+    expect(response.status).toBe(200);
+    expect(response.headers.get("cache-control")).toBe("no-store");
+    const config = await response.json();
+    expect(config.limits.rooms).toBe(2);
+    expect(config.gpu).toEqual({ enabled: false, state: "offline" });
+    const get = await f.request("/api/config", undefined, undefined, "GET");
+    expect(await get.json()).toEqual(config);
+    for (const body of [{}, { v: 1 }, { v: 2, secret: "no" }]) {
+      expect((await f.request("/api/config", body)).status).toBe(400);
+    }
+    expect(
+      (
+        await f.request(
+          "/api/config",
+          { v: 2 },
+          undefined,
+          "POST",
+          "https://evil.example",
+        )
+      ).status,
+    ).toBe(403);
+    expect(
+      (
+        await fetch(f.base + "/api/config", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ v: 2 }),
+        })
+      ).status,
+    ).toBe(403);
+    expect(
+      (
+        await fetch(f.base + "/api/config", {
+          method: "POST",
+          headers: { Origin: origin },
+          body: JSON.stringify({ v: 2 }),
+        })
+      ).status,
+    ).toBe(415);
+  });
   it("advertises the effective lower configured limits", async () => {
     const f = await fixture({
       limits: { jpegBytes: 32768, rooms: 2, roomBytes: 1048576 },

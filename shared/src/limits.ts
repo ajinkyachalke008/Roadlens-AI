@@ -28,3 +28,21 @@ export const LIMITS = Object.freeze({
   processBytes: 256 * 1024 * 1024,
   rateEntries: 2048,
 });
+
+/** Analysis transport is separate from the 1 Hz viewer preview budget. */
+export const GPU_LIMITS = Object.freeze({
+  headerBytes: 4096,
+  jpegBytes: 192 * 1024,
+  jpegTarget: 80 * 1024,
+  messageBytes: 256 * 1024,
+  textBytes: 32 * 1024,
+  imageEdge: 960,
+  defaultEdge: 640,
+  maxHz: 15,
+  targetHz: 10,
+  inFlight: 1,
+  frameTimeoutMs: 2000,
+  helloMs: 5000,
+  heartbeatMs: 15000,
+  staleMs: 45000,
+});

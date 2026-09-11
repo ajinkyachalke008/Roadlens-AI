@@ -31,7 +31,11 @@
     "deploy:verify": "node scripts/verify-deploy.mjs",
     "test:production": "node scripts/smoke-production.mjs",
     "smoke:frontend": "node scripts/smoke-frontend.mjs",
-    "test:split-production": "node scripts/smoke-split.mjs"
+    "test:split-production": "node scripts/smoke-split.mjs",
+    "test:gpu": "playwright test --config tests/gpu/playwright.config.ts",
+    "test:start": "node tests/scripts/start-worker.mjs",
+    "test:worker": "node scripts/worker-python.mjs -m pytest worker/tests -q",
+    "gpu:benchmark": "node scripts/worker-python.mjs -m worker.runtime.benchmark"
   },
   "dependencies": {
     "express": "5.2.1",

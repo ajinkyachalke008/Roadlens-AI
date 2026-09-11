@@ -452,7 +452,13 @@ export default function Viewer() {
           <Stage frame={frame} status={status} speedUnit={speedUnit} />
           <Metrics frame={frame} previewHz={previewHz} speedUnit={speedUnit} />
           <div className="status-strip">
-            <span>Sampled analyzed frames · camera computes detection</span>
+            <span>
+              Sampled analyzed frames ·{" "}
+              {frame?.result.executionProvider === "wasm" ||
+              frame?.result.executionProvider === "webgpu"
+                ? "Browser AI"
+                : "GPU AI"}
+            </span>
             <span>
               {frame
                 ? `Received ${age.toFixed(0)}s ago`

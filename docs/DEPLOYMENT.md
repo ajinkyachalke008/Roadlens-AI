@@ -1,5 +1,17 @@
 # Deployment
 
+## GPU extension
+
+The optional local Windows worker connects outbound to `wss://<actual-relay>/worker`; camera GPU frames use `/gpu`, while original camera/viewer pairing remains `/ws`. All three terminate on the same ordinary Node process. Both Render blueprints now declare ROADLENS_WORKER_SECRET as an operator-supplied private environment value. Copy the same secret only into ignored .env.worker; Vercel receives no worker credential. Leave the backend value unset to disable GPU registration. No Python package/model is installed by the relay build.
+
+Camera start uses a strict Origin-validated POST /api/config read to prefer a ready GPU. The same-origin GET omission of Origin is not bypassed. Public status exposes only enabled/ready/busy/offline, never machine identifiers or room listings.
+
+Configure Vercel exactly as below once the relay is authorized. Existing frontend-only VITE_SHARING_DISABLED=true also disables GPU discovery/transmission; the current public release stays usable with browser inference. Existing ALLOWED_ORIGINS must remain the exact Vercel origin, and the worker URL must be WSS with no credentials/query. No inbound local listener or tunnel is needed.
+
+Current official [Render free-instance terms](https://render.com/docs/free) and [bandwidth terms](https://render.com/docs/outbound-bandwidth) were rechecked during this upgrade: payment-method workspaces can incur supplementary bandwidth charges; WebSocket egress counts. GPU image forwarding increases egress and shares existing room/process byte caps. The prior strict no-overage blocker therefore remains; no billing/resource workaround was applied. Start the worker only for actual work/demo and stop it afterward; its active connection heartbeat consumes free service hours and is not advertised as free unlimited video hosting.
+
+After deploying both authorized components: configure ignored .env.worker, run .\start.ps1, wait for actual authenticated readiness, open public camera, confirm GPU frame results, pair a viewer and test fallback by stopping the worker. Run cloud smoke and repeat after relay restart. Stop local dev services while leaving the intentional GPU worker running. A local GPU test does not establish production WSS or physical phone performance.
+
 Vercel production frontend: https://roadlens-ai-five.vercel.app (project roadlens-ai, Hobby). Public application source: https://github.com/kokoc30/roadlens-ai. The static deployment passed asset and dual-profile browser smoke. One Render Free relay process is prepared but not deployed. See FINAL_HANDOFF.md for actual URLs and completed checks. Configuration readiness does not establish a cloud deployment.
 
 ## Current authorization boundary

@@ -38,6 +38,9 @@ const staticDir =
 const relay = createRelay({
   origins,
   limits,
+  ...(process.env.ROADLENS_WORKER_SECRET
+    ? { workerSecret: process.env.ROADLENS_WORKER_SECRET }
+    : {}),
   ...(staticDir ? { staticDir } : {}),
 });
 relay.server.listen(port, "0.0.0.0");

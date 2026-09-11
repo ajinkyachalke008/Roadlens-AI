@@ -4,6 +4,10 @@ frontend/dist/
 .env*
 !.env.example
 !frontend/.env.example
+!.env.worker.example
+worker/models/
+worker/.config/
+*.engine
 .venv*/
 training/.venv*/
 training/checkpoints/
@@ -50,5 +54,8 @@ docs/*
 !docs/OPTIONAL_FEATURES_AUDIT.md
 !docs/MEASUREMENT_RELEASE_AUDIT.md
 !docs/RELAY_RELEASE_AUDIT.md
+!docs/GPU_WORKER.md
+!docs/GPU_BENCHMARK.md
+!docs/GPU_RELEASE_RESULTS.md
 # Generated local measurements/screenshots are not corresponding source.
 tests/model/browser-results.json

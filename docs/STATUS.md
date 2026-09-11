@@ -1,5 +1,15 @@
 # RoadLens release status
 
+## GPU upgrade — active September 11, 2026
+
+The latest explicit user request supersedes the old browser-only/local-worker prohibition: add an optional outbound local Windows NVIDIA detector, preserve WASM fallback and all RAM-only pairing/report semantics. Initial Git main was clean at5917cb24d8c6540ce8f4649dafd8b46a55968e64. No preexisting changes were overwritten.
+
+P0 baseline reproduced before source edits: npm ci (0 vulnerabilities), model:prepare, typecheck, lint,106 unit,34 contract,33 real relay,11 real browser-model,9 E2E,9 privacy E2E plus32-module scan, build, compiled paired production1/1 and all3 deployment schemas PASS. Production smoke18.0s. Hardware observed: RTX5070Ti16303MiB, driver610.74, compute12.0, nvcc13.0.48, Python3.13.12. CUDA neural inference is not yet established by this preflight.
+
+P1–P7 implemented and verified locally: separate versioned GPU transport, isolated CUDA runtime, synchronized camera integration, fallback, launcher and benchmark. Final core suites pass 124 unit, 49 contract and 61 relay tests; worker tests pass 39 tests and 68 subtests. Real GPU browser acceptance passes 1/1 in 22.5 seconds; full browser E2E and privacy each pass 10/10 in 1.6 minutes, with a 35-module privacy scan. Browser-model tests pass 11/11 in 6.3 seconds. Compiled same-origin and split HTTPS/WSS paired production tests each pass 1/1 in 17.1 and 20.3 seconds. Normal Windows startup/Ctrl+C passes; 21 synthetic training safeguards pass without training. Clean install has zero reported vulnerabilities; model preparation, typecheck, lint, build and all three deployment schemas pass. Camera remains authority for time_aware_iou_v1, source-time geometry/rules and report revisions. Local test ports are stopped. Public application files passed Gitleaks 8.30.1 with no leaks. Publication and frontend redeployment are being finalized. P8 remains blocked by the existing no-overage Render account constraint. P9 physical phone and field accuracy remain unverified. OCR/wrong-way remain disabled and training unrun.
+
+## Historical browser-only release evidence
+
 Release-hardening run, September10–11,2026. This repository contains the actual application, locked dependencies, real model assets, tests and free-hosting configurations. Physical-phone and field-speed verification remain separate external gates.
 
 ## Initial state and preservation

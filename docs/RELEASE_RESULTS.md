@@ -1,5 +1,7 @@
 # Release verification ledger
 
+This ledger preserves the earlier browser-only release. Current optional GPU implementation and final verification are recorded in [GPU_RELEASE_RESULTS.md](GPU_RELEASE_RESULTS.md) and [FINAL_HANDOFF.md](FINAL_HANDOFF.md); the old counts and deployment SHA below are historical.
+
 This is the release-hardening run, separate from the archived implementation baseline. Test doubles are labeled; real browser-model inference and real relay tests are explicitly distinguished.
 
 ## Completed release checks

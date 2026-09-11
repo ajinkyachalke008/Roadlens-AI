@@ -259,12 +259,16 @@ export class RelayClient {
         this.expire("Invalid relay message");
       }
     };
-    ws.onclose = () => {
+    ws.onclose = (event) => {
       if (generation !== this.generation) return;
       this.connected = false;
       this.viewerCount = 0;
       if (this.heartbeat) clearInterval(this.heartbeat);
       if (this.closed) return;
+      if (event.code === 1008) {
+        this.expire("Pairing expired — create a new code");
+        return;
+      }
       if (++this.attempts > 6) {
         this.expire("Pairing expired — create a new code");
         return;

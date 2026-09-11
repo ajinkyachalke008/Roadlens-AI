@@ -12,6 +12,12 @@ import {
 } from "../../../shared/src/schemas";
 import { LIMITS } from "../../../shared/src/limits";
 import { AdaptivePerformance } from "./performance";
+import {
+  RemoteDetector,
+  GpuDroppedFrameError,
+  type GpuDiagnostics,
+} from "../inference/remote";
+import type { DetectionResult } from "../inference/types";
 export interface CompletedFrame {
   result: FrameResult;
   policy: CameraPolicy;
@@ -68,6 +74,40 @@ export class CameraCapture {
   onError = (_message: string) => {};
   onReset = () => {};
   onProfile = (_profile: 416 | 320, _automatic: boolean) => {};
+  onInferenceMode = (_mode: string) => {};
+  remote: RemoteDetector | null = null;
+  private switching = false;
+  private activeJob: symbol | null = null;
+  private browserProfile: 416 | 320 = 416;
+  private sourceFrames = 0;
+  private skippedFrames = 0;
+  private trackingMs = 0;
+  private sourceTimes: number[] = [];
+  get operationVersion() {
+    return this.generation;
+  }
+  get gpuDiagnostics():
+    | (GpuDiagnostics & {
+        sourceFrames: number;
+        skippedFrames: number;
+        trackingMs: number;
+        sourceHz: number;
+      })
+    | null {
+    return this.remote
+      ? {
+          ...this.remote.diagnostics,
+          sourceFrames: this.sourceFrames,
+          skippedFrames: this.skippedFrames,
+          trackingMs: this.trackingMs,
+          sourceHz:
+            this.sourceTimes.length > 1
+              ? ((this.sourceTimes.length - 1) * 1000) /
+                Math.max(1, this.sourceTimes.at(-1)! - this.sourceTimes[0])
+              : 0,
+        }
+      : null;
+  }
   private detector: DetectorClient | null = null;
   private tracker = new TimeAwareTracker();
   private guard = new BackgroundGuard();
@@ -108,9 +148,18 @@ export class CameraCapture {
     this.latest = null;
     this.onReset();
   }
-  async start(profile: 416 | 320 = 416, file?: File | null) {
+  async start(
+    profile: 416 | 320 = 416,
+    file?: File | null,
+    remote?: RemoteDetector,
+  ) {
     this.pause(false);
     const generation = ++this.generation;
+    this.browserProfile = profile;
+    this.sourceFrames = 0;
+    this.skippedFrames = 0;
+    this.sourceTimes = [];
+    if (remote?.ready) this.attachRemote(remote);
     if (file !== undefined) this.sourceFile = file;
     if (file === null) {
       if (this.replayUrl) URL.revokeObjectURL(this.replayUrl);
@@ -158,16 +207,19 @@ export class CameraCapture {
       }
       await this.video.play();
       if (generation !== this.generation) return;
-      this.onStatus("Loading detector");
-      this.detector?.dispose();
-      this.detector = new DetectorClient();
-      await this.detector.load(profile, (p) =>
-        this.onStatus(
-          p.total
-            ? `Loading detector · ${Math.round((p.loaded / p.total) * 100)}%`
-            : "Loading detector",
-        ),
-      );
+      if (!this.remote?.ready) {
+        this.onInferenceMode("Browser AI");
+        this.onStatus("Loading detector");
+        this.detector?.dispose();
+        this.detector = new DetectorClient();
+        await this.detector.load(profile, (p) =>
+          this.onStatus(
+            p.total
+              ? `Loading detector · ${Math.round((p.loaded / p.total) * 100)}%`
+              : "Loading detector",
+          ),
+        );
+      }
       if (generation !== this.generation) return;
       this.running = true;
       this.lastCompletedAt = performance.now();
@@ -180,6 +232,52 @@ export class CameraCapture {
       this.onError(
         error instanceof Error ? error.message : "Camera or model unavailable",
       );
+    }
+  }
+  private attachRemote(remote: RemoteDetector) {
+    this.remote?.close();
+    this.remote = remote;
+    remote.onUnavailable = (reason) => {
+      if (this.remote === remote)
+        void this.useBrowser(`${reason} · Browser fallback`);
+    };
+    this.onInferenceMode("GPU AI · Online");
+  }
+  useGpu(remote: RemoteDetector) {
+    if (!this.running || this.switching) {
+      remote.close();
+      return;
+    }
+    if (!remote.ready) throw new Error("GPU not ready");
+    this.attachRemote(remote);
+    this.detector?.dispose();
+    this.detector = null;
+    this.resetEpoch();
+  }
+  async useBrowser(reason = "Browser AI") {
+    this.remote?.close();
+    this.remote = null;
+    this.resetEpoch();
+    this.onInferenceMode(reason);
+    if (!this.running) return;
+    const generation = this.generation;
+    this.switching = true;
+    this.onStatus("Loading detector · browser fallback");
+    try {
+      this.detector?.dispose();
+      this.detector = new DetectorClient();
+      await this.detector.load(this.browserProfile);
+      if (generation !== this.generation || !this.running) return;
+      this.performancePolicy = new AdaptivePerformance(this.browserProfile);
+      this.lastCompletedAt = performance.now();
+      this.onStatus(this.sourceMode === "replay_video" ? "Replay" : "Live");
+    } catch {
+      if (generation === this.generation) {
+        this.pause();
+        this.onError("Browser fallback unavailable. Resume to retry.");
+      }
+    } finally {
+      if (generation === this.generation) this.switching = false;
     }
   }
   checkSourceHealth(now = performance.now()) {
@@ -259,7 +357,20 @@ export class CameraCapture {
     this.rules.invalidateContinuity();
   }
   private async analyze(sourceTimeMs: number) {
-    if (!this.running || this.busy || !this.detector || !this.video.videoWidth)
+    this.sourceFrames++;
+    const received = performance.now();
+    this.sourceTimes.push(received);
+    this.sourceTimes = this.sourceTimes
+      .filter((t) => received - t <= 5000)
+      .slice(-600);
+    if (this.busy || this.switching) this.skippedFrames++;
+    if (
+      !this.running ||
+      this.busy ||
+      this.switching ||
+      (!this.detector && !this.remote?.ready) ||
+      !this.video.videoWidth
+    )
       return;
     const geometry = `${this.video.videoWidth}:${this.video.videoHeight}`;
     if (
@@ -274,11 +385,13 @@ export class CameraCapture {
     this.lastSource = sourceTimeMs;
     if (
       performance.now() - this.lastStartedAt <
-      this.performancePolicy.intervalMs
+      (this.remote?.diagnostics.intervalMs ?? this.performancePolicy.intervalMs)
     )
       return;
     this.lastStartedAt = performance.now();
     this.busy = true;
+    const job = Symbol();
+    this.activeJob = job;
     const generation = this.generation;
     const epoch = this.captureEpoch;
     const started = performance.now();
@@ -296,10 +409,30 @@ export class CameraCapture {
     canvas.getContext("2d")!.drawImage(this.video, 0, 0);
     const capturedAtIso = new Date().toISOString();
     const policy = structuredClone(this.policy);
+    const frameSeq = this.frameSeq++;
+    const remote = this.remote;
     try {
-      const output = await this.detector.detect(
-        await createImageBitmap(canvas),
-      );
+      let output: DetectionResult;
+      if (remote) {
+        const result = await remote.detect(canvas, {
+          sourceId: this.sourceId,
+          captureEpoch: epoch,
+          frameSeq,
+          frameId: `${epoch}:${frameSeq}`,
+          sourceTimeMs,
+          sourceWidth: canvas.width,
+          sourceHeight: canvas.height,
+        });
+        output = {
+          detections: result.detections,
+          modelId: result.modelId,
+          modelSha256: result.modelSha256,
+          executionProvider: result.runtime,
+          profile: result.inputSize,
+          inferenceMs: result.metrics.inferenceMs,
+        };
+      } else
+        output = await this.detector!.detect(await createImageBitmap(canvas));
       if (
         generation !== this.generation ||
         epoch !== this.captureEpoch ||
@@ -329,12 +462,14 @@ export class CameraCapture {
         }
         if (this.background === "camera_moved") this.calibration = null;
       }
+      const trackingStarted = performance.now();
       const tracked = this.tracker.update(
         output.detections,
         sourceTimeMs,
         epoch,
         !!this.calibration && this.mounted && this.background === "verified",
       );
+      this.trackingMs = performance.now() - trackingStarted;
       const counts = emptyCounts();
       const candidates: CompletedFrame["candidates"] = [];
       const tracks = tracked.map((track) => {
@@ -378,7 +513,6 @@ export class CameraCapture {
       const speeds = tracks
         .filter((t) => t.speedMps !== null)
         .map((t) => t.speedMps!);
-      const frameSeq = this.frameSeq++;
       const result = FrameSchema.parse({
         v: 2,
         frameId: `${epoch}:${frameSeq}`,
@@ -425,7 +559,8 @@ export class CameraCapture {
       this.sourceStalled = false;
       this.onStatus(this.sourceMode === "replay_video" ? "Replay" : "Live");
       this.onFrame(frame);
-      if (this.performancePolicy.observe(frame.processingMs)) {
+      if (!remote && this.performancePolicy.observe(frame.processingMs)) {
+        this.browserProfile = 320;
         this.resetEpoch();
         this.onProfile(320, true);
         this.onStatus("Loading detector · adapting to 320");
@@ -435,6 +570,13 @@ export class CameraCapture {
         this.onStatus(this.sourceMode === "replay_video" ? "Replay" : "Live");
       }
     } catch (error) {
+      if (epoch !== this.captureEpoch) return;
+      if (error instanceof GpuDroppedFrameError) return;
+      if (remote && generation === this.generation && this.running) {
+        if (this.remote === remote)
+          await this.useBrowser("GPU unavailable · Browser fallback");
+        return;
+      }
       if (generation === this.generation && this.running) {
         this.pause();
         this.onError(
@@ -442,12 +584,24 @@ export class CameraCapture {
         );
       }
     } finally {
-      this.busy = false;
+      if (this.activeJob === job) {
+        this.busy = false;
+        this.activeJob = null;
+      }
+      if (this.latest?.canvas !== canvas) {
+        canvas.width = 1;
+        canvas.height = 1;
+      }
     }
   }
   pause(notify = true) {
     this.running = false;
     this.generation++;
+    this.switching = false;
+    this.busy = false;
+    this.activeJob = null;
+    this.remote?.close();
+    this.remote = null;
     if (this.callbackId) this.video.cancelVideoFrameCallback?.(this.callbackId);
     if (this.fallbackTimer) clearTimeout(this.fallbackTimer);
     this.stream?.getTracks().forEach((t) => t.stop());

@@ -875,3 +875,17 @@ hr {
     padding-bottom: env(safe-area-inset-bottom);
   }
 }
+/* Long verified model names remain contained in the mobile settings drawer. */
+.gpu-diagnostics {
+  display: grid;
+  gap: 0.3rem;
+  font-size: 0.8rem;
+}
+.gpu-diagnostics dt {
+  color: var(--muted, #9aa8a0);
+  margin-top: 0.5rem;
+}
+.gpu-diagnostics dd {
+  margin: 0;
+  overflow-wrap: anywhere;
+}

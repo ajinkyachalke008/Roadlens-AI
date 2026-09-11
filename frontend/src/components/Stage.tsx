@@ -64,6 +64,7 @@ export function Stage({
           ref={canvas}
           data-testid="analyzed-frame"
           data-frame-id={frame.result.frameId}
+          data-provider={frame.result.executionProvider}
           aria-label={`Analyzed frame ${frame.result.frameSeq}, ${frame.result.tracks.filter((t) => t.observed).length} observed objects`}
         />
       ) : (

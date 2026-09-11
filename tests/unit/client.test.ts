@@ -282,3 +282,83 @@ describe("B16 native socket outbound byte bounds", () => {
     client.close();
   });
 });
+describe("room handshake rejection and transient reconnection", () => {
+  class FakeSocket {
+    static OPEN = 1;
+    static instances: FakeSocket[] = [];
+    readyState = 1;
+    binaryType = "";
+    onopen = () => {};
+    onmessage = (_event: { data: string }) => {};
+    onclose = (_event: { code: number }) => {};
+    onerror = () => {};
+    send = vi.fn();
+    close = vi.fn();
+    constructor() {
+      FakeSocket.instances.push(this);
+    }
+  }
+  function connect() {
+    vi.useFakeTimers();
+    FakeSocket.instances = [];
+    vi.stubGlobal("WebSocket", FakeSocket);
+    vi.stubGlobal("location", { origin: "http://127.0.0.1:5173" });
+    const client = new RelayClient(
+      uuid(1),
+      "camera",
+      "ram-only-token",
+      "epoch",
+    );
+    const state = vi.fn();
+    client.onState = state;
+    client.connect();
+    FakeSocket.instances[0]!.onopen();
+    return { client, state, socket: FakeSocket.instances[0]! };
+  }
+  it("expires a rejected 1008 handshake immediately without retaining retry work", async () => {
+    const { client, state, socket } = connect();
+    socket.onclose({ code: 1008 });
+    expect(state).toHaveBeenLastCalledWith(
+      "Pairing expired — create a new code",
+    );
+    expect(client.connected).toBe(false);
+    expect(client.viewerCount).toBe(0);
+    expect(vi.getTimerCount()).toBe(0);
+    await vi.advanceTimersByTimeAsync(60_000);
+    client.connect();
+    expect(FakeSocket.instances).toHaveLength(1);
+    expect(socket.send).toHaveBeenCalledOnce();
+    client.close();
+  });
+  it.each([1006, 1013])(
+    "retries transient close %i and permits a new handshake",
+    async (code) => {
+      const { client, state, socket } = connect();
+      socket.onclose({ code });
+      expect(state).toHaveBeenLastCalledWith("Source offline · reconnecting");
+      expect(vi.getTimerCount()).toBe(1);
+      await vi.advanceTimersByTimeAsync(999);
+      expect(FakeSocket.instances).toHaveLength(1);
+      await vi.advanceTimersByTimeAsync(1);
+      expect(FakeSocket.instances).toHaveLength(2);
+      const replacement = FakeSocket.instances[1]!;
+      replacement.onopen();
+      expect(JSON.parse(replacement.send.mock.calls[0]![0])).toMatchObject({
+        type: "hello",
+        token: "ram-only-token",
+      });
+      replacement.onmessage({
+        data: JSON.stringify({
+          v: 2,
+          type: "hello.ok",
+          serverEpoch: "epoch",
+          viewerCount: 0,
+        }),
+      });
+      expect(client.connected).toBe(true);
+      expect(state).toHaveBeenLastCalledWith("Connected");
+      client.close();
+      expect(vi.getTimerCount()).toBe(0);
+    },
+  );
+});

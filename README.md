@@ -4,7 +4,7 @@
 
 The public frontend currently supports camera/replay analysis and local reports. Remote sharing is disabled until a Render workspace meets the required no-overage condition.
 
-Temporary traffic monitoring from a camera browser. React + TypeScript + Vite runs genuine YOLO26n detection through an ONNX Runtime Web worker. A small Node + Express + ws process pairs devices and relays sampled analyzed images. The phone performs inference, tracking, geometry and rules; the relay is neither an AI server nor a database.
+Temporary traffic monitoring with browser inference and an optional local NVIDIA GPU worker. React + TypeScript + Vite retains genuine YOLO26n ONNX Runtime Web fallback. The optional Windows worker runs YOLO26s640 on CUDA and connects outward to the Node/Express/ws relay. The phone remains authoritative for tracking, geometry, rules and reports; the relay only pairs and forwards bounded data.
 
 Video comes first, metrics and temporary reports below. Start a rear camera or select a permitted replay. Connect another browser using a random expiring code. Replay remains labeled and runs actual inference. The viewer does not load a detector or request a camera.
 
@@ -19,6 +19,18 @@ npm run dev
 ```
 
 Open http://127.0.0.1:5173 in two desktop browsers. Choose Start camera, or Settings → Use replay video. Share camera creates a code for Connect to camera. A local development URL is not a public phone deployment.
+
+## Optional GPU setup
+
+```powershell
+# First setup only: isolated Python 3.13, pinned packages and cached models.
+.\setup-worker.ps1 -PythonExecutable python
+# Configure ignored .env.worker with actual relay WSS URL and machine secret.
+# Normal operation; Ctrl+C stops this foreground worker.
+.\start.ps1
+```
+
+GPU startup never installs packages or rebuilds an engine. The selected verified runtime is PyTorch CUDA; ONNX CUDA also passes real parity. TensorRT did not complete its bounded build and is unverified. See [GPU setup/protocol](docs/GPU_WORKER.md) and [actual benchmarks](docs/GPU_BENCHMARK.md). No Python CPU fallback, inbound port or tunnel is used. Cloud GPU operation is blocked until the authorized relay exists; browser fallback remains independent of the GPU computer.
 
 ## Verification
 
@@ -38,6 +50,11 @@ npm run build
 npm run test:production
 npm run test:split-production
 npm run deploy:verify
+# With worker setup completed on the NVIDIA machine:
+npm run test:worker
+npm run test:start
+npm run test:gpu
+npm run gpu:benchmark
 ```
 
 The real-model browser tests use a permitted official sample photograph with recorded provenance. They prove execution and reference parity, not field detection quality. Exact results and external gates are in [the handoff](docs/FINAL_HANDOFF.md).
@@ -48,7 +65,7 @@ Eight Crockford Base32 characters, displayed XXXX-XXXX, invite viewers for ten m
 
 Reports are limited to200; optional evidence starts off and is capped at20 images/8MiB. No application localStorage, sessionStorage, IndexedDB, service-worker cache or disk media. Reload loses page state. Pause invalidates measurement continuity; Stop sharing can keep camera-local reports; End session clears the session. Explicit JSON/CSV/image downloads are user-owned files and cannot be revoked, nor can screenshots.
 
-Remote updates default to1Hz (maximum2), JPEG long edge640px, hard cap128KiB. Images and metadata describe the same completed frame. Slow consumers drop preview work. No viewers means no image uploads. Bandwidth limits are application limits, not a provider billing guarantee.
+Viewer updates default to1Hz (maximum2), JPEG long edge640px, hard cap128KiB. GPU analysis is a separate bounded stream, default640long edge, at most15Hz and one in-flight job, with optional960 encoding. Images and metadata describe the same completed frame. Slow consumers drop work. No viewers means no preview upload; enabled GPU analysis still sends images to the worker. All relay egress joins existing room/process caps, which are application limits rather than provider billing guarantees.
 
 ## Model and speed limitations
 
@@ -60,6 +77,6 @@ Plate recognition and wrong-way alerts are disabled. No custom training ran. [Op
 
 ## Hosting and release
 
-[Vercel static frontend + Render Free relay](docs/DEPLOYMENT.md), or the documented single-Render fallback. WebSockets and inference are not Vercel Functions. No development computer is needed at runtime after a complete deployment. Exact status, URLs and remaining account restrictions are recorded in [FINAL_HANDOFF.md](docs/FINAL_HANDOFF.md). A frontend-only release explicitly disables sharing.
+[Vercel static frontend + Render Free relay](docs/DEPLOYMENT.md), or the documented single-Render fallback. WebSockets and inference are not Vercel Functions. Browser mode needs no development computer after deployment; optional GPU mode needs the Windows worker running. Exact status, URLs and remaining account restrictions are recorded in [FINAL_HANDOFF.md](docs/FINAL_HANDOFF.md). A frontend-only release explicitly disables sharing and GPU transport.
 
 The application is released under [AGPL-3.0](LICENSE), with [third-party notices](THIRD_PARTY_NOTICES.md). Public source includes the application, build scripts, tests and model provenance. Private instruction/research packs, credentials, datasets and generated captures are excluded.

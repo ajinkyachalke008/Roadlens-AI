@@ -1,5 +1,19 @@
 # RoadLens demo runbook
 
+## GPU demonstration
+
+Current cloud GPU path is blocked by the undeployed Render relay. Once that deployment is authorized and verified:
+
+1. Complete .\setup-worker.ps1 once, then configure the actual WSS relay and matching private machine secret in ignored .env.worker.
+2. Run .\start.ps1 on the NVIDIA computer; wait for verified GPU warmup and authenticated relay readiness. Keep this worker running, but stop local development servers.
+3. Open the verified public Vercel camera URL on the phone. Start camera; confirm GPU AI Online and real returning detections. Sharing uses the existing temporary code. Connect the second device and save/review/export an observation.
+4. Pause/resume or switch Settings → Use browser AI. Each switch clears measurement continuity. Stop the worker to demonstrate actual automatic WASM fallback; restart it and explicitly choose Use GPU worker to return safely.
+5. End session and confirm views/reports clear; Ctrl+C stops the foreground worker. Downloaded files/screenshots cannot be revoked.
+
+For the verified automated local GPU path, run npm run build followed by npm run test:gpu after worker setup. It uses actual CUDA with a clearly labeled still-photo replay; it is not real traffic motion, a physical phone or cloud evidence. Detailed runtime/transport metrics are in the settings drawer and generated local test artifacts.
+
+Physical GPU checklist: phone on cellular, viewer on a second network; record source dimensions,640/960 analysis encoding, actual submission/resultHz, same-clock age/RTT, worker runtime and measured inference, GPU failure/recovery, permission/background behavior and end cleanup. The phone does not request a microphone, and the worker computer requires no inbound port. All such physical checks remain NOT VERIFIED until executed.
+
 Verified public frontend: https://roadlens-ai-five.vercel.app. See FINAL_HANDOFF.md for release status. Full two-device cloud operation requires an authorized deployed relay; a frontend-only release explicitly disables sharing.
 
 ## Local paired demonstration
@@ -45,4 +59,4 @@ Use a safe controlled permitted site and independent speed reference. Never ask 
 - Invalid calibration/background/tracking: null speed; save a genuine observation.
 - Optional plates/wrong-way: disabled, never fabricated.
 
-The phone runs inference; the relay only forwards bounded sampled updates. There are no end-user accounts or cloud report database. Candidates require human review and are not legal citations.
+Browser mode runs inference on the phone; optional GPU mode forwards bounded analysis images to the user's outbound worker. The relay runs no model. There are no end-user accounts or cloud report database. Candidates require human review and are not legal citations.

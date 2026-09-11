@@ -12,6 +12,7 @@ import { z } from "zod";
 import { LIMITS } from "../../shared/src/limits.js";
 import { HelloSchema, ControlSchema } from "../../shared/src/schemas.js";
 import { decodePacket } from "../../shared/src/packets.js";
+import { createGpuRelay } from "./gpu.js";
 
 type Bounds = { [K in keyof typeof LIMITS]: number };
 export interface RelayConfig {
@@ -19,6 +20,7 @@ export interface RelayConfig {
   staticDir?: string;
   now?: () => number;
   limits?: Partial<Bounds>;
+  workerSecret?: string;
 }
 type Member = {
   id: string;
@@ -140,6 +142,7 @@ export function createRelay(config: RelayConfig) {
   }
   function endRoom(room: Room, reason: string) {
     if (!rooms.delete(room.id)) return;
+    gpu.endRoom(room.id);
     codes.delete(room.code);
     room.requests.clear();
     room.retiredRequests.clear();
@@ -198,6 +201,53 @@ export function createRelay(config: RelayConfig) {
     for (const member of room.viewers.values())
       send(room, member.socket, packet);
   }
+  const gpu = createGpuRelay({
+    secret: config.workerSecret,
+    origins,
+    serverEpoch,
+    now,
+    authorizeCamera: (roomId, token) => {
+      const room = rooms.get(roomId);
+      return (
+        !!room &&
+        room.expiresAt > now() &&
+        room.owner.socket?.readyState === WebSocket.OPEN &&
+        equalToken(token, room.owner.digest)
+      );
+    },
+    roomExists: (roomId) => {
+      const room = rooms.get(roomId);
+      return (
+        !!room &&
+        room.expiresAt > now() &&
+        room.owner.socket?.readyState === WebSocket.OPEN
+      );
+    },
+    rateUpgrade: (address) => rate(`gpu-upgrade:${address}`, 60),
+    sendRoom: (roomId, socket, payload, droppable) => {
+      const room = rooms.get(roomId);
+      return !!room && send(room, socket, payload, droppable);
+    },
+    sendGlobal: (socket, payload) => {
+      const size = Buffer.byteLength(payload);
+      if (socket.readyState !== WebSocket.OPEN) return false;
+      if (
+        socket.bufferedAmount + size > limits.bufferBytes ||
+        bootBytes + size > limits.processBytes
+      ) {
+        if (bootBytes + size > limits.processBytes)
+          for (const room of [...rooms.values()])
+            endRoom(room, "sharing_budget_exhausted");
+        disconnect(socket, 1013);
+        return false;
+      }
+      bootBytes += size;
+      socket.send(payload, (error) => {
+        if (error) socket.terminate();
+      });
+      return true;
+    },
+  });
   function viewerCount(room: Room) {
     return [...room.viewers.values()].filter(
       (m) => m.socket?.readyState === WebSocket.OPEN,
@@ -431,7 +481,29 @@ export function createRelay(config: RelayConfig) {
   app.get("/healthz", (_req, res) =>
     res.json({ healthy: true, v: 2, serverEpoch }),
   );
-  app.get("/api/config", (_req, res) => res.json({ v: 2, limits }));
+  const publicConfig = () => ({ v: 2, limits, gpu: gpu.status() });
+  app.get("/api/config", (_req, res) => res.json(publicConfig()));
+  // Same-origin browser GET requests can omit Origin. POST keeps the exact-Origin
+  // policy intact while allowing the explicit camera-start capability probe.
+  app.post("/api/config", (req, res) => {
+    if (
+      !z
+        .object({ v: z.literal(2) })
+        .strict()
+        .safeParse(req.body).success
+    ) {
+      res
+        .status(400)
+        .json(
+          errorBody(
+            "invalid_request",
+            "A versioned config request is required.",
+          ),
+        );
+      return;
+    }
+    res.json(publicConfig());
+  });
   app.post("/api/rooms", (req, res) => {
     if (!rate(`create:${req.socket.remoteAddress}`, 3)) {
       res
@@ -634,6 +706,7 @@ export function createRelay(config: RelayConfig) {
     },
   );
   server.on("upgrade", (req, socket, head) => {
+    if (gpu.handleUpgrade(req, socket, head)) return;
     if (
       closed ||
       req.url !== "/ws" ||
@@ -666,6 +739,7 @@ export function createRelay(config: RelayConfig) {
       member.socket = undefined;
       if (!rooms.has(room.id)) return;
       if (role === "camera") {
+        gpu.ownerDisconnected(room.id);
         room.status = "offline";
         room.ownerDeadline = now() + limits.ownerGraceMs;
         broadcast(room, {
@@ -716,6 +790,8 @@ export function createRelay(config: RelayConfig) {
           )
             throw new Error("handshake");
           const previous = member.socket;
+          if (previous && hello.role === "camera")
+            gpu.ownerDisconnected(room.id);
           member.socket = socket;
           if (previous) disconnect(previous, 1000, "Connection replaced");
           bindings.set(socket, {
@@ -940,6 +1016,7 @@ export function createRelay(config: RelayConfig) {
     });
   });
   function maintain() {
+    gpu.maintain();
     const time = now();
     for (const [socket, deadline] of deadlines)
       if (time >= deadline) {
@@ -991,6 +1068,7 @@ export function createRelay(config: RelayConfig) {
     app,
     server,
     wss,
+    gpuWss: gpu.wss,
     serverEpoch,
     maintain,
     stats: () => ({
@@ -1007,12 +1085,14 @@ export function createRelay(config: RelayConfig) {
         0,
       ),
       bootBytes,
+      gpu: gpu.stats(),
     }),
     close: async () => {
       closed = true;
       clearInterval(cleanup);
       clearInterval(heartbeat);
       for (const room of [...rooms.values()]) endRoom(room, "relay_shutdown");
+      await gpu.close();
       for (const socket of wss.clients) socket.terminate();
       rates.clear();
       deadlines.clear();

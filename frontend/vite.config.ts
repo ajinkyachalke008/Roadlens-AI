@@ -16,6 +16,7 @@ export default defineConfig({
       "/api": "http://127.0.0.1:10000",
       "/healthz": "http://127.0.0.1:10000",
       "/ws": { target: "ws://127.0.0.1:10000", ws: true },
+      "/gpu": { target: "ws://127.0.0.1:10000", ws: true },
     },
   },
   build: { target: "es2022", outDir: "dist" },

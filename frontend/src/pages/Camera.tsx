@@ -1,5 +1,9 @@
 import { useEffect, useRef, useState } from "react";
-import { CameraCapture, type CompletedFrame } from "../camera/capture";
+import {
+  CameraCapture,
+  STALLED_STATUS,
+  type CompletedFrame,
+} from "../camera/capture";
 import { SessionStore } from "../session/store";
 import {
   RelayClient,
@@ -569,7 +573,14 @@ export default function Camera() {
     }
   }
   const running =
-    status === "Live" || status === "Replay" || status === "Source stalled";
+    status === "Live" || status === "Replay" || status === STALLED_STATUS;
+  // GPU mode owns a relay room before any viewer joins, so name the three
+  // states separately instead of leaving a disabled Share button unexplained.
+  const shareState = room
+    ? viewers > 0
+      ? `Shared · ${viewers}/2 viewers`
+      : "Shared · code ready"
+    : "Share · off";
   const loading = status.startsWith("Loading") || status === "Preparing camera";
   return (
     <>
@@ -582,8 +593,11 @@ export default function Camera() {
           <span className="badge" data-testid="inference-mode">
             {gpuConnecting ? "GPU AI · Connecting" : inferenceMode}
           </span>
-          <span className="badge" data-testid="connection-state">
-            {connection}
+          <span className="badge">
+            Relay · <span data-testid="connection-state">{connection}</span>
+          </span>
+          <span className="badge" data-testid="share-state">
+            {shareState}
           </span>
         </div>
       </div>
@@ -606,7 +620,7 @@ export default function Camera() {
             onClick={() => void share()}
             disabled={!!room || sharing || !sharingAvailable()}
           >
-            {sharing ? "Connecting…" : "Share camera"}
+            {room ? "Sharing active" : sharing ? "Connecting…" : "Share camera"}
           </button>
           <button onClick={() => setDrawer("calibration")} disabled={!frame}>
             Calibrate
@@ -657,7 +671,12 @@ export default function Camera() {
             </small>
           </div>
           <div>
-            <p>Anyone with this code can view this session.</p>
+            <p>
+              Anyone with this code can view this session.
+              {inferenceMode.startsWith("GPU")
+                ? " GPU analysis already uses this relay room; viewers are separate."
+                : ""}
+            </p>
             <div className="actions">
               <button
                 onClick={() =>
@@ -843,6 +862,52 @@ export default function Camera() {
                   <dd>{d.trackingMs.toFixed(2)} ms</dd>
                   <dt>Analysis sent / in-flight limit</dt>
                   <dd>{(d.bytes / 1048576).toFixed(2)} MiB / 1</dd>
+                </dl>
+              );
+            })()}
+          <hr />
+          <h3>Capture diagnostics</h3>
+          {capture.current &&
+            (() => {
+              const d = capture.current.frameDiagnostics;
+              return (
+                <dl
+                  className="gpu-diagnostics"
+                  data-testid="capture-diagnostics"
+                  data-scheduler={d.scheduler}
+                  data-timing-source={d.timingSource ?? ""}
+                  data-presented-frames={d.presentedFrames ?? ""}
+                  data-source-time-ms={d.sourceTimeMs}
+                  data-frame-seq={d.frameSeq}
+                  data-accepted-frames={d.acceptedFrames}
+                  data-source-hz={d.sourceHz}
+                  data-accepted-hz={d.acceptedHz}
+                  data-analysis-hz={d.analysisHz}
+                >
+                  <dt>Source mode / scheduler</dt>
+                  <dd>
+                    {d.sourceMode} / {d.scheduler}
+                  </dd>
+                  <dt>Timing source / presented frames</dt>
+                  <dd>
+                    {d.timingSource ?? "—"} / {d.presentedFrames ?? "—"}
+                  </dd>
+                  <dt>Latest source time / frame</dt>
+                  <dd>
+                    {d.sourceTimeMs.toFixed(0)} ms / {d.frameSeq}
+                  </dd>
+                  <dt>Callback / accepted / analysed</dt>
+                  <dd>
+                    {d.sourceHz.toFixed(1)} / {d.acceptedHz.toFixed(1)} /{" "}
+                    {d.analysisHz.toFixed(1)} Hz
+                  </dd>
+                  <dt>Callbacks / accepted / duplicate / busy</dt>
+                  <dd>
+                    {d.sourceFrames} / {d.acceptedFrames} / {d.duplicateFrames}{" "}
+                    / {d.skippedFrames}
+                  </dd>
+                  <dt>Build</dt>
+                  <dd data-testid="build-id">{__BUILD_ID__}</dd>
                 </dl>
               );
             })()}

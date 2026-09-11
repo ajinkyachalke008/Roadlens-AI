@@ -31,13 +31,11 @@ test("GPU preparation privacy: delayed status cannot resume after Pause or hidde
       await held;
       await route.fulfill({ response });
     });
-    await page
-      .getByLabel("Choose replay video")
-      .setInputFiles({
-        name: "permitted-bus-still-photo.webm",
-        mimeType: "video/webm",
-        buffer: replay,
-      });
+    await page.getByLabel("Choose replay video").setInputFiles({
+      name: "permitted-bus-still-photo.webm",
+      mimeType: "video/webm",
+      buffer: replay,
+    });
     await waiting;
     if (action === "pause")
       await page
@@ -1384,6 +1382,97 @@ test("B12/B42 privacy: replay switches to explicit Chromium fake camera with rea
     expect(trace.tracksStopped).toBeGreaterThanOrEqual(1);
     expect(trace.workersCreated).toBeGreaterThan(0);
     expect(trace.workersEnded).toBe(trace.workersCreated);
+  } finally {
+    await context.close();
+    await browser.close();
+  }
+});
+
+/**
+ * Regression coverage for the physical-iPhone failure, not physical validation:
+ * a live MediaStream whose frame metadata reports mediaTime 0 for every
+ * presented frame. Chromium supplies the real presentation timing an iPhone
+ * also supplies; only mediaTime is pinned to reproduce Safari.
+ */
+test("B-clock live camera with iOS-style mediaTime 0 keeps advancing past frame 0", async ({}, testInfo) => {
+  const path = testInfo.outputPath("permitted-still-photo-ios-clock.y4m");
+  await writeFile(path, fakeCameraImage);
+  const browser = await chromium.launch({
+    channel: "chromium",
+    headless: true,
+    args: [
+      "--use-fake-ui-for-media-stream",
+      "--use-fake-device-for-media-stream",
+      `--use-file-for-fake-video-capture=${path}`,
+    ],
+  });
+  const context = await browser.newContext({
+    baseURL: base,
+    permissions: ["camera"],
+    ignoreHTTPSErrors: localTlsAllowed(),
+  });
+  await instrument(context);
+  await context.addInitScript(() => {
+    const original = HTMLVideoElement.prototype.requestVideoFrameCallback;
+    if (!original) return;
+    HTMLVideoElement.prototype.requestVideoFrameCallback = function (
+      callback: VideoFrameRequestCallback,
+    ) {
+      return original.call(this, (now, metadata) => {
+        callback(
+          now,
+          this.srcObject instanceof MediaStream
+            ? { ...metadata, mediaTime: 0 }
+            : metadata,
+        );
+      });
+    };
+  });
+  const page = await context.newPage();
+  const label = page.getByTestId("frame-clock-label");
+  const readFrame = async () => {
+    const text = await label.innerText();
+    const match = /Frame (\d+) · (\d+) ms source time/.exec(text);
+    expect(match, `unexpected frame label: ${text}`).not.toBeNull();
+    return { seq: Number(match![1]), sourceTimeMs: Number(match![2]) };
+  };
+  try {
+    await page.goto("/camera");
+    await page
+      .getByRole("button", { name: "Start camera", exact: true })
+      .click();
+    await expect(page.getByTestId("analyzed-frame")).toBeVisible({
+      timeout: 60_000,
+    });
+    // The bug froze the analysed view at "Frame 0 · 0 ms source time" forever.
+    await expect(label).toHaveText(/Frame [1-9]\d* · [1-9]\d* ms source time/, {
+      timeout: 30_000,
+    });
+    const first = await readFrame();
+    await expect
+      .poll(async () => (await readFrame()).seq, { timeout: 30_000 })
+      .toBeGreaterThan(first.seq + 1);
+    const later = await readFrame();
+    expect(later.sourceTimeMs).toBeGreaterThan(first.sourceTimeMs);
+    await page.getByRole("button", { name: "Settings", exact: true }).click();
+    const diagnostics = page.getByTestId("capture-diagnostics");
+    await expect(diagnostics).toHaveAttribute(
+      "data-scheduler",
+      "frame_callback",
+    );
+    await expect(diagnostics).toHaveAttribute(
+      "data-timing-source",
+      /presentationTime|expectedDisplayTime|callbackNow/,
+    );
+    expect(
+      Number(await diagnostics.getAttribute("data-accepted-frames")),
+    ).toBeGreaterThan(1);
+    expect(
+      Number(await diagnostics.getAttribute("data-source-time-ms")),
+    ).toBeGreaterThan(0);
+    expect(await page.getByTestId("share-state").innerText()).toBe(
+      "Share · off",
+    );
   } finally {
     await context.close();
     await browser.close();

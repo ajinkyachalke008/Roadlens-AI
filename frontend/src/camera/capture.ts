@@ -13,6 +13,11 @@ import {
 import { LIMITS } from "../../../shared/src/limits";
 import { AdaptivePerformance } from "./performance";
 import {
+  FrameClock,
+  type FrameSample,
+  type FrameTimingSource,
+} from "./frameClock";
+import {
   RemoteDetector,
   GpuDroppedFrameError,
   type GpuDiagnostics,
@@ -32,6 +37,12 @@ export interface CompletedFrame {
     estimate: SpeedEstimate;
   }[];
 }
+/** Shown when a visible source stops producing completed analysis. */
+export const STALLED_STATUS = "Camera analysis stalled · retrying";
+/** No frame callback within this window while the source is playing is a stall. */
+const CALLBACK_STALL_MS = 2000;
+/** No completed analysis within this window is an analysis stall. */
+const ANALYSIS_STALL_MS = 5000;
 export const newPolicy = (): CameraPolicy => ({
   version: crypto.randomUUID(),
   roadLabel: "",
@@ -81,10 +92,52 @@ export class CameraCapture {
   private browserProfile: 416 | 320 = 416;
   private sourceFrames = 0;
   private skippedFrames = 0;
+  private duplicateFrames = 0;
+  private acceptedFrames = 0;
   private trackingMs = 0;
   private sourceTimes: number[] = [];
+  private acceptedTimes: number[] = [];
   get operationVersion() {
     return this.generation;
+  }
+  private hz(times: number[]) {
+    return times.length > 1
+      ? ((times.length - 1) * 1000) / Math.max(1, times.at(-1)! - times[0]!)
+      : 0;
+  }
+  /** Capture-side frame clock health. Available with or without a GPU worker. */
+  get frameDiagnostics(): {
+    sourceMode: "live_camera" | "replay_video";
+    scheduler: "frame_callback" | "timer";
+    sourceFrames: number;
+    acceptedFrames: number;
+    duplicateFrames: number;
+    skippedFrames: number;
+    sourceHz: number;
+    acceptedHz: number;
+    analysisHz: number;
+    presentedFrames: number | null;
+    timingSource: FrameTimingSource | null;
+    sourceTimeMs: number;
+    frameSeq: number;
+    trackingMs: number;
+  } {
+    return {
+      sourceMode: this.sourceMode,
+      scheduler: this.frameCallbacks ? "frame_callback" : "timer",
+      sourceFrames: this.sourceFrames,
+      acceptedFrames: this.acceptedFrames,
+      duplicateFrames: this.duplicateFrames,
+      skippedFrames: this.skippedFrames,
+      sourceHz: this.hz(this.sourceTimes),
+      acceptedHz: this.hz(this.acceptedTimes),
+      analysisHz: this.hz(this.completionTimes),
+      presentedFrames: this.frameClock.presentedFrames,
+      timingSource: this.frameClock.timingSource,
+      sourceTimeMs: this.frameClock.sourceTimeMs,
+      frameSeq: this.frameSeq,
+      trackingMs: this.trackingMs,
+    };
   }
   get gpuDiagnostics():
     | (GpuDiagnostics & {
@@ -100,11 +153,7 @@ export class CameraCapture {
           sourceFrames: this.sourceFrames,
           skippedFrames: this.skippedFrames,
           trackingMs: this.trackingMs,
-          sourceHz:
-            this.sourceTimes.length > 1
-              ? ((this.sourceTimes.length - 1) * 1000) /
-                Math.max(1, this.sourceTimes.at(-1)! - this.sourceTimes[0])
-              : 0,
+          sourceHz: this.hz(this.sourceTimes),
         }
       : null;
   }
@@ -117,7 +166,11 @@ export class CameraCapture {
   private busy = false;
   private generation = 0;
   private frameSeq = 0;
-  private lastSource = -1;
+  private frameClock = new FrameClock();
+  private lastCallbackAt = -Infinity;
+  /** Frame callbacks are preferred; the timer is a bounded, one-way recovery. */
+  private frameCallbacks = true;
+  private schedulerRecovered = false;
   private lastStartedAt = -Infinity;
   private lastCompletedAt = 0;
   private sourceStalled = false;
@@ -137,7 +190,8 @@ export class CameraCapture {
   resetEpoch() {
     this.captureEpoch = crypto.randomUUID();
     this.frameSeq = 0;
-    this.lastSource = -1;
+    // Timing history never crosses an epoch: a new epoch is a new timeline.
+    this.frameClock.reset();
     this.lastStartedAt = -Infinity;
     this.calibration = null;
     this.background = "background_unverified";
@@ -158,7 +212,13 @@ export class CameraCapture {
     this.browserProfile = profile;
     this.sourceFrames = 0;
     this.skippedFrames = 0;
+    this.duplicateFrames = 0;
+    this.acceptedFrames = 0;
     this.sourceTimes = [];
+    this.acceptedTimes = [];
+    this.frameCallbacks = true;
+    this.schedulerRecovered = false;
+    this.lastCallbackAt = -Infinity;
     if (remote?.ready) this.attachRemote(remote);
     if (file !== undefined) this.sourceFile = file;
     if (file === null) {
@@ -223,6 +283,8 @@ export class CameraCapture {
       if (generation !== this.generation) return;
       this.running = true;
       this.lastCompletedAt = performance.now();
+      // Armed here so a frame callback that never fires is still detected.
+      this.lastCallbackAt = performance.now();
       this.onStatus(this.sourceMode === "replay_video" ? "Replay" : "Live");
       this.schedule();
     } catch (error) {
@@ -281,31 +343,72 @@ export class CameraCapture {
     }
   }
   checkSourceHealth(now = performance.now()) {
+    if (!this.running) return;
+    // A visible, playing source whose frame callbacks stopped gets exactly one
+    // recovery: the timer scheduler replaces them. The two never run together.
     if (
-      this.running &&
+      this.frameCallbacks &&
+      !this.schedulerRecovered &&
+      this.lastCallbackAt > -Infinity &&
+      now - this.lastCallbackAt > CALLBACK_STALL_MS &&
+      !this.video.paused &&
+      this.video.readyState >= 2
+    ) {
+      this.frameCallbacks = false;
+      this.schedulerRecovered = true;
+      this.lastCallbackAt = now;
+      this.onStatus(STALLED_STATUS);
+      this.schedule();
+      return;
+    }
+    if (
       !this.busy &&
       !this.sourceStalled &&
-      now - this.lastCompletedAt > 5000
+      now - this.lastCompletedAt > ANALYSIS_STALL_MS
     ) {
       this.sourceStalled = true;
       this.resetEpoch();
-      this.onStatus("Source stalled");
+      this.onStatus(STALLED_STATUS);
+    }
+  }
+  private cancelScheduled() {
+    if (this.callbackId) {
+      this.video.cancelVideoFrameCallback?.(this.callbackId);
+      this.callbackId = 0;
+    }
+    if (this.fallbackTimer) {
+      clearTimeout(this.fallbackTimer);
+      this.fallbackTimer = null;
     }
   }
   private schedule() {
+    this.cancelScheduled();
     if (!this.running) return;
-    if ("requestVideoFrameCallback" in this.video)
+    if (this.frameCallbacks && "requestVideoFrameCallback" in this.video)
       this.callbackId = this.video.requestVideoFrameCallback(
-        (_now, metadata) => {
+        (now, metadata) => {
+          this.callbackId = 0;
+          this.lastCallbackAt = performance.now();
           this.schedule();
-          void this.analyze(metadata.mediaTime * 1000);
+          void this.analyze({
+            now,
+            metadata,
+            currentTime: this.video.currentTime,
+          });
         },
       );
-    else
+    else {
+      this.frameCallbacks = false;
       this.fallbackTimer = setTimeout(() => {
+        this.fallbackTimer = null;
+        this.lastCallbackAt = performance.now();
         this.schedule();
-        void this.analyze(this.video.currentTime * 1000);
+        void this.analyze({
+          now: performance.now(),
+          currentTime: this.video.currentTime,
+        });
       }, 50);
+    }
   }
   private gray(canvas: HTMLCanvasElement) {
     const small = document.createElement("canvas");
@@ -356,7 +459,7 @@ export class CameraCapture {
     this.tracker.invalidateMeasurements();
     this.rules.invalidateContinuity();
   }
-  private async analyze(sourceTimeMs: number) {
+  private async analyze(sample: FrameSample) {
     this.sourceFrames++;
     const received = performance.now();
     this.sourceTimes.push(received);
@@ -372,17 +475,29 @@ export class CameraCapture {
       !this.video.videoWidth
     )
       return;
+    let tick = this.frameClock.nextFrame(this.sourceMode, sample);
+    if (!tick.accept) {
+      this.duplicateFrames++;
+      return;
+    }
     const geometry = `${this.video.videoWidth}:${this.video.videoHeight}`;
-    if (
-      this.geometry !== geometry ||
-      sourceTimeMs < this.lastSource ||
-      (sourceTimeMs - this.lastSource > 2000 && this.lastSource >= 0)
-    ) {
+    if (this.geometry !== geometry || tick.discontinuity) {
+      // resetEpoch clears the clock, so the same frame is re-read on the fresh
+      // timeline: frame 0 of an epoch always carries that epoch's first time.
       this.resetEpoch();
       this.geometry = geometry;
+      tick = this.frameClock.nextFrame(this.sourceMode, sample);
+      if (!tick.accept) {
+        this.duplicateFrames++;
+        return;
+      }
     }
-    if (sourceTimeMs === this.lastSource) return;
-    this.lastSource = sourceTimeMs;
+    const sourceTimeMs = tick.sourceTimeMs;
+    this.acceptedFrames++;
+    this.acceptedTimes.push(received);
+    this.acceptedTimes = this.acceptedTimes
+      .filter((t) => received - t <= 5000)
+      .slice(-600);
     if (
       performance.now() - this.lastStartedAt <
       (this.remote?.diagnostics.intervalMs ?? this.performancePolicy.intervalMs)
@@ -602,8 +717,8 @@ export class CameraCapture {
     this.activeJob = null;
     this.remote?.close();
     this.remote = null;
-    if (this.callbackId) this.video.cancelVideoFrameCallback?.(this.callbackId);
-    if (this.fallbackTimer) clearTimeout(this.fallbackTimer);
+    this.cancelScheduled();
+    this.lastCallbackAt = -Infinity;
     this.stream?.getTracks().forEach((t) => t.stop());
     this.stream = null;
     this.video.pause();

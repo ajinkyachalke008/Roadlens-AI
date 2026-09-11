@@ -88,7 +88,7 @@ export function Stage({
             ? `${frame.result.frameWidth} × ${frame.result.frameHeight}`
             : "CAMERA-SIDE INFERENCE"}
         </span>
-        <span>
+        <span data-testid="frame-clock-label">
           {frame
             ? `Frame ${frame.result.frameSeq} · ${frame.result.sourceTimeMs.toFixed(0)} ms source time`
             : "Temporary session"}

@@ -18,6 +18,12 @@ import {
   type FrameTimingSource,
 } from "./frameClock";
 import {
+  frameRateNote,
+  frameRateOptions,
+  type FrameRateChoice,
+  type FrameRateStatus,
+} from "./frameRate";
+import {
   RemoteDetector,
   GpuDroppedFrameError,
   type GpuDiagnostics,
@@ -157,6 +163,73 @@ export class CameraCapture {
         }
       : null;
   }
+  /** Operator frame-rate request; "auto" leaves the track's own choice alone. */
+  frameRate: FrameRateChoice = "auto";
+  /** Operator analysis-rate request in FPS; "auto" uses the measured controller. */
+  analysisRate: "auto" | number = "auto";
+  private track: MediaStreamTrack | null = null;
+  private readonly baseVideoConstraints: MediaTrackConstraints = {
+    width: { ideal: 1280 },
+    height: { ideal: 720 },
+  };
+  /** Live presentation time now. Display-side overlay age only. */
+  sourceTimeNow(now = performance.now()) {
+    if (this.sourceMode === "replay_video")
+      return Number.isFinite(this.video.currentTime)
+        ? this.video.currentTime * 1000
+        : this.frameClock.sourceTimeMs;
+    return this.frameClock.liveElapsedMs(now) ?? this.frameClock.sourceTimeMs;
+  }
+  get cameraFrameRate(): FrameRateStatus {
+    const track = this.track;
+    const settings = track?.getSettings?.() ?? null;
+    const capabilities = track?.getCapabilities?.() ?? null;
+    const actual =
+      typeof settings?.frameRate === "number" &&
+      Number.isFinite(settings.frameRate)
+        ? settings.frameRate
+        : null;
+    const options = frameRateOptions(capabilities, settings);
+    return {
+      requested: this.frameRate,
+      actual,
+      options,
+      supported: !!track && typeof track.applyConstraints === "function",
+      note: frameRateNote(this.frameRate, actual),
+    };
+  }
+  /**
+   * Ask the track for a rate and report what it actually selected. A camera
+   * reconfiguration invalidates timing continuity, so measurement restarts.
+   */
+  async applyFrameRate(choice: FrameRateChoice) {
+    const track = this.track;
+    this.frameRate = choice;
+    if (!track?.applyConstraints)
+      return { applied: false, status: this.cameraFrameRate };
+    try {
+      await track.applyConstraints(
+        choice === "auto"
+          ? { ...this.baseVideoConstraints }
+          : { ...this.baseVideoConstraints, frameRate: { ideal: choice } },
+      );
+    } catch {
+      return { applied: false, status: this.cameraFrameRate };
+    }
+    if (this.running) this.resetEpoch();
+    return { applied: true, status: this.cameraFrameRate };
+  }
+  /** Submission spacing: an operator target may slow analysis, never outrun safety. */
+  targetIntervalMs() {
+    const automatic =
+      this.remote?.diagnostics.intervalMs ?? this.performancePolicy.intervalMs;
+    if (this.analysisRate === "auto") return automatic;
+    const requested = 1000 / this.analysisRate;
+    return Math.max(
+      requested,
+      this.remote ? this.remote.diagnostics.backoffMs : 16,
+    );
+  }
   private detector: DetectorClient | null = null;
   private tracker = new TimeAwareTracker();
   private guard = new BackgroundGuard();
@@ -256,6 +329,9 @@ export class CameraCapture {
         }
         this.stream = stream;
         this.video.srcObject = stream;
+        this.track = stream.getVideoTracks()[0] ?? null;
+        if (this.frameRate !== "auto")
+          await this.applyFrameRate(this.frameRate);
         stream.getVideoTracks().forEach((t) =>
           t.addEventListener("ended", () => {
             if (this.running) {
@@ -498,10 +574,7 @@ export class CameraCapture {
     this.acceptedTimes = this.acceptedTimes
       .filter((t) => received - t <= 5000)
       .slice(-600);
-    if (
-      performance.now() - this.lastStartedAt <
-      (this.remote?.diagnostics.intervalMs ?? this.performancePolicy.intervalMs)
-    )
+    if (performance.now() - this.lastStartedAt < this.targetIntervalMs())
       return;
     this.lastStartedAt = performance.now();
     this.busy = true;
@@ -721,6 +794,7 @@ export class CameraCapture {
     this.lastCallbackAt = -Infinity;
     this.stream?.getTracks().forEach((t) => t.stop());
     this.stream = null;
+    this.track = null;
     this.video.pause();
     this.video.srcObject = null;
     this.detector?.dispose();
@@ -739,5 +813,7 @@ export class CameraCapture {
     this.sourceId = crypto.randomUUID();
     this.policy = newPolicy();
     this.mounted = false;
+    this.frameRate = "auto";
+    this.analysisRate = "auto";
   }
 }

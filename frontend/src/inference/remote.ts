@@ -24,6 +24,8 @@ export interface GpuDiagnostics {
   rttMs: number | null;
   worker: GpuMetrics | null;
   intervalMs: number;
+  /** Congestion floor: raised only by drops, decayed only by completions. */
+  backoffMs: number;
   submittedHz: number;
   resultHz: number;
 }
@@ -43,6 +45,7 @@ export class RemoteDetector {
   descriptor: GpuDescriptor | null = null;
   ready = false;
   private measurements: Omit<GpuDiagnostics, "submittedHz" | "resultHz"> = {
+    backoffMs: 1000 / GPU_LIMITS.maxHz + 5,
     submitted: 0,
     completed: 0,
     dropped: 0,
@@ -216,6 +219,11 @@ export class RemoteDetector {
               minimumSendIntervalMs,
               this.measurements.intervalMs * 0.75 + desired * 0.25,
             );
+            // A completed frame is evidence the path recovered.
+            this.measurements.backoffMs = Math.max(
+              minimumSendIntervalMs,
+              this.measurements.backoffMs * 0.9,
+            );
             job.resolve(m);
           }
         } catch {
@@ -330,9 +338,16 @@ export class RemoteDetector {
   }
   private drop(reason: string): GpuDroppedFrameError {
     this.measurements.dropped++;
-    this.measurements.intervalMs = Math.min(
+    this.measurements.backoffMs = Math.min(
       1000,
-      Math.max(minimumSendIntervalMs, this.measurements.intervalMs * 1.5),
+      Math.max(minimumSendIntervalMs, this.measurements.backoffMs * 1.5),
+    );
+    this.measurements.intervalMs = Math.max(
+      this.measurements.backoffMs,
+      Math.min(
+        1000,
+        Math.max(minimumSendIntervalMs, this.measurements.intervalMs * 1.5),
+      ),
     );
     return new GpuDroppedFrameError(reason);
   }

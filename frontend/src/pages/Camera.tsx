@@ -18,7 +18,14 @@ import {
   PolicySchema,
   type Report,
 } from "../../../shared/src/schemas";
-import { Stage, Metrics, type DisplayFrame } from "../components/Stage";
+import {
+  Stage,
+  Metrics,
+  type DisplayFrame,
+  type OverlayTelemetry,
+} from "../components/Stage";
+import { OVERLAY_LIMITS } from "../camera/overlay";
+import type { FrameRateChoice } from "../camera/frameRate";
 import { Reports } from "../components/Reports";
 import { Drawer } from "../components/Drawer";
 import { CalibrationDrawer } from "../components/CalibrationDrawer";
@@ -51,6 +58,28 @@ export default function Camera() {
   const [analysisEdge, setAnalysisEdge] = useState<640 | 960>(640);
   const gpuAttempt = useRef(0);
   const [speedUnit, setSpeedUnit] = useState<SpeedUnit>("mph");
+  const [frameRate, setFrameRate] = useState<FrameRateChoice>("auto");
+  const [analysisRate, setAnalysisRate] = useState<"auto" | number>("auto");
+  const [smoothing, setSmoothing] = useState(true);
+  const [cameraNote, setCameraNote] = useState("");
+  const [cameraTrack, setCameraTrack] = useState<{
+    actual: number | null;
+    options: number[];
+    supported: boolean;
+    note: string;
+  } | null>(null);
+  const overlay = useRef<OverlayTelemetry>({
+    ageMs: 0,
+    holdMs: 0,
+    health: "healthy",
+    displayHz: 0,
+    boxes: 0,
+    extrapolatedMs: 0,
+  });
+  // Stable identity: the render loop must not be torn down by a re-render.
+  const sourceTimeNow = useRef(
+    () => capture.current?.sourceTimeNow() ?? 0,
+  ).current;
   const [previewHz, setPreviewHz] = useState(0);
   const [clock, setClock] = useState(Date.now());
   const [sharing, setSharing] = useState(false);
@@ -313,6 +342,11 @@ export default function Camera() {
       setPreferGpu(true);
       setAnalysisEdge(640);
       setInferenceMode("Browser AI");
+      setFrameRate("auto");
+      setAnalysisRate("auto");
+      setSmoothing(true);
+      setCameraNote("");
+      setCameraTrack(null);
       setSharing(false);
       c.end();
       relay.current?.close();
@@ -357,6 +391,8 @@ export default function Camera() {
     screen.orientation?.addEventListener("change", rotation);
     const timer = setInterval(() => {
       setClock(Date.now());
+      // Capability reads stay at 1 Hz: never in the render or overlay loop.
+      setCameraTrack(c.cameraFrameRate);
       c.checkSourceHealth();
       if (!relay.current?.viewerCount) {
         uploads.current = [];
@@ -601,8 +637,15 @@ export default function Camera() {
           </span>
         </div>
       </div>
-      <video ref={video} className="capture-source" aria-hidden="true" />
-      <Stage frame={frame} status={status} speedUnit={speedUnit} />
+      <Stage
+        frame={frame}
+        status={status}
+        speedUnit={speedUnit}
+        videoRef={video}
+        sourceTimeNow={sourceTimeNow}
+        smoothing={smoothing}
+        telemetry={overlay}
+      />
       <div className="controls">
         <div className="actions">
           <button
@@ -705,7 +748,12 @@ export default function Camera() {
           </div>
         </section>
       )}
-      <Metrics frame={frame} previewHz={previewHz} speedUnit={speedUnit} />
+      <Metrics
+        frame={frame}
+        previewHz={previewHz}
+        speedUnit={speedUnit}
+        cameraHz={capture.current?.frameDiagnostics.sourceHz ?? 0}
+      />
       <div className="status-strip">
         <span>{calibrationStatus}</span>
         <span>
@@ -753,7 +801,56 @@ export default function Camera() {
       )}
       {drawer === "settings" && (
         <Drawer title="Camera settings" onClose={() => setDrawer(null)}>
-          <h3>Inference</h3>
+          <h3>Performance</h3>
+          <label>
+            Camera frame rate
+            <select
+              value={String(frameRate)}
+              onChange={(e) => {
+                const value =
+                  e.target.value === "auto"
+                    ? "auto"
+                    : (Number(e.target.value) as FrameRateChoice);
+                setFrameRate(value);
+                void (async () => {
+                  const c = capture.current;
+                  if (!c) return;
+                  const result = await c.applyFrameRate(value);
+                  setCameraTrack(result.status);
+                  setCameraNote(
+                    result.applied
+                      ? ""
+                      : "Camera kept its current frame rate; it did not accept that request.",
+                  );
+                })();
+              }}
+            >
+              <option value="auto">Auto</option>
+              {(cameraTrack?.options ?? []).map((value: number) => (
+                <option key={value} value={String(value)}>
+                  {value} FPS
+                </option>
+              ))}
+            </select>
+          </label>
+          <label>
+            AI analysis rate
+            <select
+              value={String(analysisRate)}
+              onChange={(e) => {
+                const value =
+                  e.target.value === "auto" ? "auto" : Number(e.target.value);
+                setAnalysisRate(value);
+                if (capture.current) capture.current.analysisRate = value;
+              }}
+            >
+              <option value="auto">Auto · measured</option>
+              <option value="10">10 FPS</option>
+              <option value="15">15 FPS</option>
+              <option value="20">20 FPS</option>
+              <option value="30">30 FPS</option>
+            </select>
+          </label>
           <label>
             GPU analysis image
             <select
@@ -767,6 +864,57 @@ export default function Camera() {
               <option value="960">960 · more detail</option>
             </select>
           </label>
+          <label className="check">
+            <input
+              type="checkbox"
+              checked={smoothing}
+              onChange={(e) => setSmoothing(e.target.checked)}
+            />
+            Smooth overlay between analysed frames
+          </label>
+          <dl
+            className="gpu-diagnostics"
+            data-testid="performance-summary"
+            data-camera-hz={capture.current?.frameDiagnostics.sourceHz ?? 0}
+            data-analysis-hz={capture.current?.frameDiagnostics.analysisHz ?? 0}
+            data-display-hz={overlay.current.displayHz}
+            data-overlay-age-ms={overlay.current.ageMs}
+            data-overlay-health={overlay.current.health}
+            data-overlay-hold-ms={overlay.current.holdMs}
+          >
+            <dt>Camera frames</dt>
+            <dd>
+              {(capture.current?.frameDiagnostics.sourceHz ?? 0).toFixed(1)} FPS
+              measured · {cameraTrack?.note ?? "camera idle"}
+            </dd>
+            <dt>AI analysis</dt>
+            <dd>
+              {(capture.current?.frameDiagnostics.analysisHz ?? 0).toFixed(1)}{" "}
+              Hz completed ·{" "}
+              {analysisRate === "auto" ? "auto" : `${analysisRate} FPS target`}
+            </dd>
+            <dt>Analysis model</dt>
+            <dd>
+              {capture.current?.remote?.descriptor
+                ? `${capture.current.remote.descriptor.modelId} · ${capture.current.remote.descriptor.runtime} · ${capture.current.remote.descriptor.inputSize}`
+                : `browser ${profile}`}{" "}
+              · selected at worker start
+            </dd>
+            <dt>Display / overlay age</dt>
+            <dd>
+              {overlay.current.displayHz.toFixed(0)} Hz ·{" "}
+              {overlay.current.ageMs.toFixed(0)} ms ({overlay.current.health})
+            </dd>
+          </dl>
+          {cameraNote && <p className="footnote">{cameraNote}</p>}
+          <p className="footnote">
+            Overlay motion between analysed frames is display only, capped at{" "}
+            {OVERLAY_LIMITS.extrapolationMs} ms and frozen past{" "}
+            {OVERLAY_LIMITS.staleMs} ms. Speed, rules, counts and evidence use
+            analysed frames only.
+          </p>
+          <hr />
+          <h3>Inference</h3>
           <label className="check">
             <input
               type="checkbox"
@@ -802,115 +950,146 @@ export default function Camera() {
             even without viewers. Switching clears tracking and calibration.
             Browser fallback stays available.
           </p>
-          {capture.current?.gpuDiagnostics &&
-            (() => {
-              const d = capture.current.gpuDiagnostics!;
-              return (
-                <dl
-                  className="gpu-diagnostics"
-                  data-testid="gpu-diagnostics"
-                  data-source-hz={d.sourceHz}
-                  data-submitted-hz={d.submittedHz}
-                  data-result-hz={d.resultHz}
-                  data-result-age-ms={d.resultAgeMs}
-                  data-processing-ms={
-                    capture.current?.latest?.processingMs ?? 0
-                  }
-                  data-tracking-ms={d.trackingMs}
-                >
-                  <dt>Model / runtime</dt>
-                  <dd>
-                    {capture.current.remote?.descriptor?.modelId} /{" "}
-                    {capture.current.remote?.descriptor?.runtime}
-                  </dd>
-                  <dt>Frames submitted / completed / skipped</dt>
-                  <dd>
-                    {d.submitted} / {d.completed} /{" "}
-                    {d.skippedFrames + d.dropped}
-                  </dd>
-                  <dt>Encoding / same-clock result age</dt>
-                  <dd>
-                    {d.encodeMs.toFixed(1)} / {d.resultAgeMs.toFixed(1)} ms
-                  </dd>
-                  <dt>Source / submitted / completed</dt>
-                  <dd>
-                    {d.sourceHz.toFixed(1)} / {d.submittedHz.toFixed(1)} /{" "}
-                    {d.resultHz.toFixed(1)} Hz
-                  </dd>
-                  <dt>Relay round trip</dt>
-                  <dd>{d.rttMs?.toFixed(1) ?? "—"} ms</dd>
-                  <dt>Decode / preprocess / inference / postprocess</dt>
-                  <dd>
-                    {d.worker
-                      ? [
-                          d.worker.decodeMs,
-                          d.worker.preprocessMs,
-                          d.worker.inferenceMs,
-                          d.worker.postprocessMs,
-                        ]
-                          .map((n) => n.toFixed(1))
-                          .join(" / ")
-                      : "—"}{" "}
-                    ms
-                  </dd>
-                  <dt>Worker total / target submission</dt>
-                  <dd>
-                    {d.worker?.totalMs.toFixed(1) ?? "—"} ms /{" "}
-                    {(1000 / d.intervalMs).toFixed(1)} Hz
-                  </dd>
-                  <dt>Camera tracking</dt>
-                  <dd>{d.trackingMs.toFixed(2)} ms</dd>
-                  <dt>Analysis sent / in-flight limit</dt>
-                  <dd>{(d.bytes / 1048576).toFixed(2)} MiB / 1</dd>
-                </dl>
-              );
-            })()}
-          <hr />
-          <h3>Capture diagnostics</h3>
-          {capture.current &&
-            (() => {
-              const d = capture.current.frameDiagnostics;
-              return (
-                <dl
-                  className="gpu-diagnostics"
-                  data-testid="capture-diagnostics"
-                  data-scheduler={d.scheduler}
-                  data-timing-source={d.timingSource ?? ""}
-                  data-presented-frames={d.presentedFrames ?? ""}
-                  data-source-time-ms={d.sourceTimeMs}
-                  data-frame-seq={d.frameSeq}
-                  data-accepted-frames={d.acceptedFrames}
-                  data-source-hz={d.sourceHz}
-                  data-accepted-hz={d.acceptedHz}
-                  data-analysis-hz={d.analysisHz}
-                >
-                  <dt>Source mode / scheduler</dt>
-                  <dd>
-                    {d.sourceMode} / {d.scheduler}
-                  </dd>
-                  <dt>Timing source / presented frames</dt>
-                  <dd>
-                    {d.timingSource ?? "—"} / {d.presentedFrames ?? "—"}
-                  </dd>
-                  <dt>Latest source time / frame</dt>
-                  <dd>
-                    {d.sourceTimeMs.toFixed(0)} ms / {d.frameSeq}
-                  </dd>
-                  <dt>Callback / accepted / analysed</dt>
-                  <dd>
-                    {d.sourceHz.toFixed(1)} / {d.acceptedHz.toFixed(1)} /{" "}
-                    {d.analysisHz.toFixed(1)} Hz
-                  </dd>
-                  <dt>Callbacks / accepted / duplicate / busy</dt>
-                  <dd>
-                    {d.sourceFrames} / {d.acceptedFrames} / {d.duplicateFrames}{" "}
-                    / {d.skippedFrames}
-                  </dd>
-                  <dt>Build</dt>
-                  <dd data-testid="build-id">{__BUILD_ID__}</dd>
-                </dl>
-              );
-            })()}
+          <details className="diagnostics">
+            <summary>Advanced diagnostics</summary>
+            {capture.current?.gpuDiagnostics &&
+              (() => {
+                const d = capture.current.gpuDiagnostics!;
+                return (
+                  <dl
+                    className="gpu-diagnostics"
+                    data-testid="gpu-diagnostics"
+                    data-source-hz={d.sourceHz}
+                    data-submitted-hz={d.submittedHz}
+                    data-result-hz={d.resultHz}
+                    data-result-age-ms={d.resultAgeMs}
+                    data-processing-ms={
+                      capture.current?.latest?.processingMs ?? 0
+                    }
+                    data-tracking-ms={d.trackingMs}
+                    data-rtt-ms={d.rttMs ?? ""}
+                    data-encode-ms={d.encodeMs}
+                    data-bytes={d.bytes}
+                    data-submitted={d.submitted}
+                    data-completed={d.completed}
+                    data-dropped={d.dropped + d.skippedFrames}
+                    data-interval-ms={d.intervalMs}
+                    data-backoff-ms={d.backoffMs}
+                    data-worker-total-ms={d.worker?.totalMs ?? ""}
+                    data-worker-decode-ms={d.worker?.decodeMs ?? ""}
+                    data-gpu-inference-ms={d.worker?.inferenceMs ?? ""}
+                  >
+                    <dt>Model / runtime</dt>
+                    <dd>
+                      {capture.current.remote?.descriptor?.modelId} /{" "}
+                      {capture.current.remote?.descriptor?.runtime}
+                    </dd>
+                    <dt>Frames submitted / completed / skipped</dt>
+                    <dd>
+                      {d.submitted} / {d.completed} /{" "}
+                      {d.skippedFrames + d.dropped}
+                    </dd>
+                    <dt>Encoding / same-clock result age</dt>
+                    <dd>
+                      {d.encodeMs.toFixed(1)} / {d.resultAgeMs.toFixed(1)} ms
+                    </dd>
+                    <dt>Source / submitted / completed</dt>
+                    <dd>
+                      {d.sourceHz.toFixed(1)} / {d.submittedHz.toFixed(1)} /{" "}
+                      {d.resultHz.toFixed(1)} Hz
+                    </dd>
+                    <dt>Relay round trip</dt>
+                    <dd>{d.rttMs?.toFixed(1) ?? "—"} ms</dd>
+                    <dt>Decode / preprocess / inference / postprocess</dt>
+                    <dd>
+                      {d.worker
+                        ? [
+                            d.worker.decodeMs,
+                            d.worker.preprocessMs,
+                            d.worker.inferenceMs,
+                            d.worker.postprocessMs,
+                          ]
+                            .map((n) => n.toFixed(1))
+                            .join(" / ")
+                        : "—"}{" "}
+                      ms
+                    </dd>
+                    <dt>Worker total / target submission</dt>
+                    <dd>
+                      {d.worker?.totalMs.toFixed(1) ?? "—"} ms /{" "}
+                      {(1000 / d.intervalMs).toFixed(1)} Hz
+                    </dd>
+                    <dt>Camera tracking</dt>
+                    <dd>{d.trackingMs.toFixed(2)} ms</dd>
+                    <dt>Analysis sent / in-flight limit</dt>
+                    <dd>{(d.bytes / 1048576).toFixed(2)} MiB / 1</dd>
+                  </dl>
+                );
+              })()}
+            {capture.current &&
+              (() => {
+                const d = capture.current.frameDiagnostics;
+                return (
+                  <dl
+                    className="gpu-diagnostics"
+                    data-testid="capture-diagnostics"
+                    data-scheduler={d.scheduler}
+                    data-timing-source={d.timingSource ?? ""}
+                    data-presented-frames={d.presentedFrames ?? ""}
+                    data-source-time-ms={d.sourceTimeMs}
+                    data-frame-seq={d.frameSeq}
+                    data-accepted-frames={d.acceptedFrames}
+                    data-source-hz={d.sourceHz}
+                    data-accepted-hz={d.acceptedHz}
+                    data-analysis-hz={d.analysisHz}
+                  >
+                    <dt>Source mode / scheduler</dt>
+                    <dd>
+                      {d.sourceMode} / {d.scheduler}
+                    </dd>
+                    <dt>Timing source / presented frames</dt>
+                    <dd>
+                      {d.timingSource ?? "—"} / {d.presentedFrames ?? "—"}
+                    </dd>
+                    <dt>Latest source time / frame</dt>
+                    <dd>
+                      {d.sourceTimeMs.toFixed(0)} ms / {d.frameSeq}
+                    </dd>
+                    <dt>Callback / accepted / analysed</dt>
+                    <dd>
+                      {d.sourceHz.toFixed(1)} / {d.acceptedHz.toFixed(1)} /{" "}
+                      {d.analysisHz.toFixed(1)} Hz
+                    </dd>
+                    <dt>Callbacks / accepted / duplicate / busy</dt>
+                    <dd>
+                      {d.sourceFrames} / {d.acceptedFrames} /{" "}
+                      {d.duplicateFrames} / {d.skippedFrames}
+                    </dd>
+                    <dt>Overlay age / hold / display</dt>
+                    <dd>
+                      {overlay.current.ageMs.toFixed(0)} ms ·{" "}
+                      {overlay.current.health} ·{" "}
+                      {overlay.current.displayHz.toFixed(0)} Hz ·{" "}
+                      {overlay.current.boxes} boxes ·{" "}
+                      {overlay.current.extrapolatedMs.toFixed(0)} ms advanced
+                    </dd>
+                    <dt>Camera rate requested / actual</dt>
+                    <dd>
+                      {String(frameRate)} /{" "}
+                      {cameraTrack?.actual?.toFixed(1) ?? "—"} FPS
+                    </dd>
+                    <dt>Analysis target / submission interval</dt>
+                    <dd>
+                      {analysisRate === "auto" ? "auto" : `${analysisRate} FPS`}{" "}
+                      / {(capture.current?.targetIntervalMs() ?? 0).toFixed(0)}{" "}
+                      ms
+                    </dd>
+                    <dt>Build</dt>
+                    <dd data-testid="build-id">{__BUILD_ID__}</dd>
+                  </dl>
+                );
+              })()}
+          </details>
           <hr />
           <label>
             Detector profile
@@ -1076,6 +1255,11 @@ export default function Camera() {
               setPreferGpu(true);
               setAnalysisEdge(640);
               setInferenceMode("Browser AI");
+              setFrameRate("auto");
+              setAnalysisRate("auto");
+              setSmoothing(true);
+              setCameraNote("");
+              setCameraTrack(null);
               setPreviewHz(0);
               uploads.current = [];
               lastPreview.current = 0;

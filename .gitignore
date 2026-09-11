@@ -57,5 +57,6 @@ docs/*
 !docs/GPU_WORKER.md
 !docs/GPU_BENCHMARK.md
 !docs/GPU_RELEASE_RESULTS.md
+!docs/PIPELINE_BENCHMARK.md
 # Generated local measurements/screenshots are not corresponding source.
 tests/model/browser-results.json

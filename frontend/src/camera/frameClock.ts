@@ -79,6 +79,17 @@ export class FrameClock {
     this.frameIdentity = 0;
   }
 
+  /**
+   * Current reading of this epoch's live presentation clock, in the same units
+   * as the live sourceTimeMs it hands out. Display-side overlay age only: it is
+   * never an observation and never reaches measurement.
+   */
+  liveElapsedMs(now: number): number | null {
+    if (!this.started || this.locked === "mediaTime" || !Number.isFinite(now))
+      return null;
+    return Math.max(this.sourceTimeMs, now - this.origin);
+  }
+
   nextFrame(mode: "live_camera" | "replay_video", sample: FrameSample) {
     return mode === "replay_video"
       ? this.nextReplayFrame(sample)

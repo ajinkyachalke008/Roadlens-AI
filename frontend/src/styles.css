@@ -289,6 +289,47 @@ h2 {
   background: #080d0a;
   aspect-ratio: auto;
 }
+.stage-view {
+  position: relative;
+}
+/* The live element is composited by the browser at the camera frame rate.
+   Analysis only draws the transparent overlay above it. */
+.stage-video {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip-path: inset(50%);
+}
+.stage-view[data-live="true"] .stage-video {
+  position: static;
+  display: block;
+  width: 100%;
+  height: auto;
+  max-height: 570px;
+  clip-path: none;
+  overflow: visible;
+  object-fit: contain;
+  background: #080d0a;
+}
+.stage-view[data-live="true"] .stage-empty {
+  display: none;
+}
+.stage .stage-overlay {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  max-height: none;
+  background: transparent;
+  pointer-events: none;
+}
+.diagnostics > summary {
+  cursor: pointer;
+  font-size: 12px;
+  color: var(--muted);
+  margin: 6px 0;
+}
 .stage-empty {
   height: 360px;
   display: flex;
@@ -862,6 +903,9 @@ hr {
     font-size: 12px;
   }
   .stage canvas {
+    max-height: 65dvh;
+  }
+  .stage-view[data-live="true"] .stage-video {
     max-height: 65dvh;
   }
 }

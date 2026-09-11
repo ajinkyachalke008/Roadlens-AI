@@ -1478,3 +1478,147 @@ test("B-clock live camera with iOS-style mediaTime 0 keeps advancing past frame 
     await browser.close();
   }
 });
+
+/**
+ * The picture must be the live element, composited at the camera frame rate,
+ * with analysis only drawing a transparent overlay above it.
+ */
+test("B-smooth live preview is decoupled from analysis and overlays the video exactly", async ({}, testInfo) => {
+  const path = testInfo.outputPath("permitted-still-photo-smooth.y4m");
+  await writeFile(path, fakeCameraImage);
+  const browser = await chromium.launch({
+    channel: "chromium",
+    headless: true,
+    args: [
+      "--use-fake-ui-for-media-stream",
+      "--use-fake-device-for-media-stream",
+      `--use-file-for-fake-video-capture=${path}`,
+    ],
+  });
+  const context = await browser.newContext({
+    baseURL: base,
+    permissions: ["camera"],
+    ignoreHTTPSErrors: localTlsAllowed(),
+  });
+  await instrument(context);
+  const page = await context.newPage();
+  try {
+    await page.goto("/camera");
+    await page
+      .getByRole("button", { name: "Start camera", exact: true })
+      .click();
+    await expect(page.getByTestId("analyzed-frame")).toBeVisible({
+      timeout: 60_000,
+    });
+    const video = page.locator("video");
+    const overlay = page.getByTestId("analyzed-frame");
+    // The live element is on screen, not the 1px hidden source it used to be.
+    const videoBox = (await video.boundingBox())!;
+    expect(videoBox.width).toBeGreaterThan(200);
+    expect(videoBox.height).toBeGreaterThan(200);
+    const overlayBox = (await overlay.boundingBox())!;
+    for (const key of ["x", "y", "width", "height"] as const)
+      expect(Math.abs(overlayBox[key] - videoBox[key])).toBeLessThan(1.5);
+    expect(await overlay.evaluate((el) => getComputedStyle(el).position)).toBe(
+      "absolute",
+    );
+    // Nothing is drawn into the overlay except boxes: the video is composited.
+    const geometry = await page.evaluate(() => {
+      const canvas = document.querySelector(
+        '[data-testid="analyzed-frame"]',
+      ) as HTMLCanvasElement;
+      const element = document.querySelector("video") as HTMLVideoElement;
+      const ctx = canvas.getContext("2d")!;
+      const { width, height } = canvas;
+      const data = ctx.getImageData(0, 0, width, height).data;
+      let painted = 0,
+        minX = width,
+        maxX = -1,
+        minY = height,
+        maxY = -1;
+      for (let y = 0; y < height; y++)
+        for (let x = 0; x < width; x++)
+          if (data[(y * width + x) * 4 + 3] > 8) {
+            painted++;
+            minX = Math.min(minX, x);
+            maxX = Math.max(maxX, x);
+            minY = Math.min(minY, y);
+            maxY = Math.max(maxY, y);
+          }
+      return {
+        width,
+        height,
+        painted,
+        minX,
+        maxX,
+        minY,
+        maxY,
+        sourceWidth: element.videoWidth,
+        sourceHeight: element.videoHeight,
+      };
+    });
+    expect(geometry.painted).toBeGreaterThan(0);
+    // Opaque pixels cover only the boxes, never a repainted video frame.
+    expect(geometry.painted).toBeLessThan(
+      geometry.width * geometry.height * 0.5,
+    );
+    const scale = Math.min(
+      geometry.width / geometry.sourceWidth,
+      geometry.height / geometry.sourceHeight,
+    );
+    const contentWidth = geometry.sourceWidth * scale;
+    const contentHeight = geometry.sourceHeight * scale;
+    const left = (geometry.width - contentWidth) / 2;
+    const top = (geometry.height - contentHeight) / 2;
+    // Detections stay inside the video content, never in the letterbox bars.
+    expect(geometry.minX).toBeGreaterThanOrEqual(Math.floor(left) - 1);
+    expect(geometry.maxX).toBeLessThanOrEqual(
+      Math.ceil(left + contentWidth) + 1,
+    );
+    expect(geometry.minY).toBeGreaterThanOrEqual(Math.floor(top) - 1);
+    expect(geometry.maxY).toBeLessThanOrEqual(
+      Math.ceil(top + contentHeight) + 1,
+    );
+    expect(left).toBeGreaterThan(1);
+    await page.getByRole("button", { name: "Settings", exact: true }).click();
+    const summary = page.getByTestId("performance-summary");
+    await expect
+      .poll(
+        async () =>
+          Math.min(
+            Number(await summary.getAttribute("data-display-hz")) / 20,
+            Number(await summary.getAttribute("data-analysis-hz")),
+          ),
+        { timeout: 30_000 },
+      )
+      .toBeGreaterThan(0.999);
+    const cameraHz = Number(await summary.getAttribute("data-camera-hz"));
+    const analysisHz = Number(await summary.getAttribute("data-analysis-hz"));
+    const displayHz = Number(await summary.getAttribute("data-display-hz"));
+    expect(analysisHz).toBeGreaterThan(0);
+    // The synthetic capture device runs at 5 FPS, so only the display rate can
+    // show the decoupling here; a real camera reports its own higher rate.
+    expect(cameraHz).toBeGreaterThan(0);
+    expect(displayHz).toBeGreaterThan(analysisHz * 3);
+    expect(displayHz).toBeGreaterThan(30);
+    expect(
+      Number(await summary.getAttribute("data-overlay-age-ms")),
+    ).toBeLessThan(2000);
+    await page.getByLabel("Smooth overlay between analysed frames").uncheck();
+    await expect(page.getByTestId("analyzed-frame")).toBeVisible();
+    await page.getByRole("button", { name: "Close drawer" }).click();
+    await page
+      .getByRole("button", { name: "Pause camera", exact: true })
+      .click();
+    await expect(page.getByTestId("analyzed-frame")).toHaveCount(0);
+    expect(
+      await page
+        .locator("video")
+        .evaluate((element) => (element as HTMLVideoElement).srcObject),
+    ).toBeNull();
+    await boundedPrivacy(page);
+  } finally {
+    await context.close();
+    await browser.close();
+  }
+});

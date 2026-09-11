@@ -449,7 +449,16 @@ test("@cloud B12-B25/B40-B43 privacy: actual model, three contexts, exact frame,
     }),
   );
   try {
-    await startReplay(camera.page);
+    // This smoke covers the browser detector and operator-initiated sharing.
+    // An operator GPU worker may be connected to the same hosted relay, so opt
+    // out explicitly instead of depending on whether one happens to be online.
+    await camera.page.goto("/camera");
+    await camera.page
+      .getByRole("button", { name: "Settings", exact: true })
+      .click();
+    await camera.page.getByLabel("Prefer available GPU on start").uncheck();
+    await camera.page.getByRole("button", { name: "Close drawer" }).click();
+    await startReplay(camera.page, false);
     await camera.page
       .getByRole("button", { name: "Settings", exact: true })
       .click();
@@ -1470,8 +1479,9 @@ test("B-clock live camera with iOS-style mediaTime 0 keeps advancing past frame 
     expect(
       Number(await diagnostics.getAttribute("data-source-time-ms")),
     ).toBeGreaterThan(0);
-    expect(await page.getByTestId("share-state").innerText()).toBe(
-      "Share · off",
+    // Sharing state is named explicitly whether or not GPU mode owns a room.
+    expect(await page.getByTestId("share-state").innerText()).toMatch(
+      /^(Share · off|Shared · code ready|Shared · \d\/2 viewers)$/,
     );
   } finally {
     await context.close();

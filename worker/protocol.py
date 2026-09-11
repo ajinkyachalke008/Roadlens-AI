@@ -75,8 +75,13 @@ def control(raw):
     require(type(message) is dict and type(message.get("v")) is int and message["v"] == 1)
     kind = message.get("type")
     if kind == "worker.registered":
-        exact(message, {"v", "type", "serverEpoch"})
+        require(type(message) is dict and set(message) <= {"v", "type", "serverEpoch", "plateProtocol"}
+                and {"v", "type", "serverEpoch"} <= set(message))
         identifier(message["serverEpoch"])
+        # Absent on a relay that predates plate support, which is exactly the
+        # signal the worker needs to stay quiet about its plate pipeline.
+        if "plateProtocol" in message:
+            require(message["plateProtocol"] == 1)
     elif kind == "worker.pong":
         exact(message, {"v", "type"})
     elif kind == "camera.cancel":

@@ -81,6 +81,12 @@ three layers so no single bug can lift the ceiling.
 | Crop payload | ≤ 96 KiB, 640 px long edge | protocol schema |
 | Minimum crop | 64 px long edge | protocol schema |
 
+Plate support is negotiated, never assumed. A relay that understands plate
+messages says so in `worker.registered`, and the worker advertises its pipeline
+only after seeing that; the camera in turn only sends a request after a
+`gpu.status` that advertises one. So a component upgraded out of order degrades
+to "Plate unavailable" instead of breaking the GPU path it shares.
+
 The worker admits a plate task **only** when no analysis frame is running and
 none is waiting. A plate request that arrives at any other moment is refused
 immediately rather than queued, so plate work can never accumulate in front of

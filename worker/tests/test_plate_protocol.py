@@ -99,6 +99,25 @@ class PlateEnvelopeTests(unittest.TestCase):
             p.plate_frame(plate_packet(value))
 
 
+class RegistrationNegotiationTests(unittest.TestCase):
+    def test_registration_without_plate_protocol_is_still_valid(self):
+        message = p.control(json.dumps(dict(v=1, type="worker.registered", serverEpoch=EPOCH)))
+        self.assertNotIn("plateProtocol", message)
+
+    def test_registration_may_advertise_plate_protocol_one(self):
+        message = p.control(json.dumps(
+            dict(v=1, type="worker.registered", serverEpoch=EPOCH, plateProtocol=1)))
+        self.assertEqual(message["plateProtocol"], 1)
+
+    def test_an_unknown_plate_protocol_or_extra_field_is_rejected(self):
+        for value in (dict(v=1, type="worker.registered", serverEpoch=EPOCH, plateProtocol=2),
+                      dict(v=1, type="worker.registered", serverEpoch=EPOCH, plateProtocol="1"),
+                      dict(v=1, type="worker.registered", serverEpoch=EPOCH, other=1),
+                      dict(v=1, type="worker.registered")):
+            with self.subTest(value=value), self.assertRaises(p.ProtocolError):
+                p.control(json.dumps(value))
+
+
 class PlateResultTests(unittest.TestCase):
     def setUp(self):
         self.header, _image = p.plate_frame(plate_packet())

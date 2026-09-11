@@ -3,6 +3,7 @@ import { PLATE_LIMITS } from "../../shared/src/limits.js";
 import {
   fixture,
   frame,
+  secret,
   plateDescriptor,
   plateRequest,
   until,
@@ -29,6 +30,23 @@ describe("Optional plate relay: bounded, correlated, subordinate", () => {
     expect(status.state).toBe("ready");
     expect(status.plate).toBeUndefined();
     expect(worker.ended).toBe(false);
+  });
+  it("tells the worker it understands plate messages before any are sent", async () => {
+    // Without this the worker must stay silent: `worker.ready` is strict, so a
+    // relay that predates plate support drops a worker that advertises one, and
+    // the operator loses GPU analysis entirely rather than just plate reading.
+    const f = await fixture();
+    const worker = await f.connect("/worker");
+    worker.send({
+      v: 1,
+      type: "worker.register",
+      role: "worker",
+      secret,
+      workerVersion: "1",
+    });
+    expect(await worker.message("worker.registered")).toMatchObject({
+      plateProtocol: 1,
+    });
   });
   it("carries a status that names the loaded plate pipeline", async () => {
     const f = await fixture();

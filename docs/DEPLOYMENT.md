@@ -30,25 +30,35 @@ The static application contains matching model/runtime assets. No WebSocket serv
 
 ## Deployment order when plate support changes
 
-Deploy **Vercel first, then Render, then restart the GPU worker.** The protocol
-negotiates plate support, so neither order can corrupt anything, but this order
-is the only one with no visible interruption.
+Deploy **Vercel first, then Render, then restart the GPU worker.** Every hop
+negotiates plate support, so no order can break anything permanently, but this
+one is the only one with no visible interruption at all.
 
-The camera sends a plate request only after a `gpu.status` that advertises a
-plate pipeline, and only a relay carrying this change ever advertises one. A new
-frontend against an old relay therefore never sends a plate request at all: plate
-recognition simply reports unavailable while traffic analysis, sharing and
-reports continue untouched.
+`worker.registered` carries `plateProtocol: 1` only from a relay that
+understands plate messages, and the worker advertises its plate pipeline only
+after seeing it. This matters more than it looks: `worker.ready` is a strict
+schema, so a worker announcing `plate` to an older relay would be rejected and
+dropped on every reconnect — costing the operator GPU analysis entirely, not
+merely plate reading. Negotiating at registration turns that from a mandatory
+upgrade order into a non-event, and
+`tests/integration/plates.test.ts` plus `worker/tests/test_plate_connection.py`
+both hold that behaviour in place.
 
-The reverse order is the one with a cost. A new relay paired with a
-plate-capable worker sends a `gpu.status` carrying a `plate` field, and a browser
-still running a cached older bundle rejects it as an unknown field and drops to
-browser inference until the page is reloaded. Nothing is lost, but GPU mode
-disappears for those tabs.
+The camera likewise sends a plate request only after a `gpu.status` that
+advertises a plate pipeline, and only an updated relay ever advertises one. A new
+frontend against an old relay therefore never sends one: plate recognition
+reports unavailable while traffic analysis, sharing and reports continue
+untouched.
 
-`render.yaml` sets `autoDeployTrigger: off`, so pushing to `main` does not
-deploy the relay. The relay must be deployed explicitly from the Render
-dashboard after the frontend is live.
+The one residual cost is a stale browser tab. A new relay paired with a
+plate-capable worker sends `gpu.status` carrying `plate`, and a browser still
+running a cached older bundle rejects the unknown field and drops to browser
+inference until it is reloaded. Deploying the frontend first is what avoids it.
+
+`render.yaml` sets `autoDeployTrigger: off`, so pushing to `main` does **not**
+deploy the relay. It must be deployed explicitly from the Render dashboard.
+Until that happens the worker simply never advertises plate support and the
+reports read "Plate unavailable".
 
 ## Complete split deployment once free-only authorization exists
 

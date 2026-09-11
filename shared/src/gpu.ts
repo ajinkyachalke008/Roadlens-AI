@@ -126,7 +126,19 @@ export const WorkerPongSchema = z
   .object({ ...base, type: z.literal("worker.pong") })
   .strict();
 export const WorkerRegisteredSchema = z
-  .object({ ...base, type: z.literal("worker.registered"), serverEpoch: id })
+  .object({
+    ...base,
+    type: z.literal("worker.registered"),
+    serverEpoch: id,
+    /**
+     * Present only on a relay that understands plate messages. A worker must
+     * not advertise a plate pipeline without seeing this: `worker.ready` is a
+     * strict schema, so an older relay rejects an unknown field and drops the
+     * worker, costing the operator GPU analysis entirely. Negotiating here
+     * makes deployment order harmless instead of mandatory.
+     */
+    plateProtocol: z.literal(1).optional(),
+  })
   .strict();
 export const GpuPingSchema = z
   .object({ ...base, type: z.literal("gpu.ping"), nonce: seq })

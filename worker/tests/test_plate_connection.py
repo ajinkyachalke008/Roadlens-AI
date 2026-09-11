@@ -13,7 +13,7 @@ from worker.config import Config
 from worker.connection import WorkerConnection
 from worker.protocol import ProtocolError
 from worker.tests.test_connection import DetectorDouble, Socket, until
-from worker.tests.test_protocol import ROOM, SECRET, header, packet
+from worker.tests.test_protocol import EPOCH, ROOM, SECRET, header, packet
 from worker.tests.test_plate_protocol import DESCRIPTOR, plate_header, plate_packet, reading
 
 
@@ -71,9 +71,19 @@ class PlateConnectionTests(unittest.IsolatedAsyncioTestCase):
             await self.client.drain()
             self.client.close_executor()
 
+    @staticmethod
+    def relay(plate_protocol=True):
+        """A relay socket that does or does not understand plate messages."""
+        socket = Socket(register=False)
+        registered = dict(v=1, type="worker.registered", serverEpoch=EPOCH)
+        if plate_protocol:
+            registered["plateProtocol"] = 1
+        socket.feed(registered)
+        return socket
+
     def start(self, plate_reader=None, socket=None):
         client = self.build(plate_reader)
-        socket = socket or Socket()
+        socket = socket or self.relay()
         self.sockets.append(socket)
         self.tasks.append(asyncio.create_task(client.serve(socket)))
         return socket
@@ -92,6 +102,25 @@ class PlateConnectionTests(unittest.IsolatedAsyncioTestCase):
         socket = self.start(self.reader)
         await until(lambda: len(socket.sent) == 2)
         self.assertEqual(socket.sent[1]["plate"], DESCRIPTOR)
+
+    async def test_a_relay_without_plate_support_is_never_told_about_it(self):
+        # `worker.ready` is strict, so announcing an unknown field to an older
+        # relay drops the worker and costs the operator GPU analysis entirely.
+        socket = self.relay(plate_protocol=False)
+        self.start(self.reader, socket)
+        await until(lambda: len(socket.sent) == 2)
+        self.assertEqual(socket.sent[1]["type"], "worker.ready")
+        self.assertNotIn("plate", socket.sent[1])
+
+    async def test_a_request_is_still_refused_cleanly_on_an_older_relay(self):
+        socket = self.relay(plate_protocol=False)
+        self.start(self.reader, socket)
+        await until(lambda: self.client.ready)
+        socket.feed(plate_packet())
+        await until(lambda: self.kinds(socket, "plate.result"))
+        # The pipeline is loaded, so a request that somehow arrives is answered
+        # rather than dropped; it simply is never solicited.
+        self.assertEqual(self.kinds(socket, "plate.result")[0]["plateText"], "ABC1234")
 
     async def test_request_without_a_plate_pipeline_is_answered_unavailable(self):
         socket = self.start(None)

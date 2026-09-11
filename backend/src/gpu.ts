@@ -308,6 +308,7 @@ export function createGpuRelay(options: GpuRelayOptions) {
                 v: 1,
                 type: "worker.registered",
                 serverEpoch: options.serverEpoch,
+                plateProtocol: 1,
               }),
             );
           } else {

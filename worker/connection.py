@@ -158,9 +158,11 @@ class WorkerConnection:
             health = await asyncio.get_running_loop().run_in_executor(self.executor, self.detector.health)
             protocol.require(health.get("ready") is True)
             ready = {"v": 1, "type": "worker.ready", **protocol.descriptor(health)}
-            if self.plate_reader is not None:
+            if self.plate_reader is not None and registered.get("plateProtocol") == 1:
                 # Advertised only when a plate detector and an OCR engine both
-                # loaded. Omitting it is the supported case, not a failure.
+                # loaded *and* this relay understands plate messages. Announcing
+                # it to an older relay would fail its strict schema and cost the
+                # operator GPU analysis, so silence is the safe default.
                 ready["plate"] = self.plate_reader.descriptor()
             await self._send(socket, ready)
             self.ready = True

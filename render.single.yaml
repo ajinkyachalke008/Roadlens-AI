@@ -1,0 +1,26 @@
+services:
+  - type: web
+    name: roadlens-basic
+    runtime: node
+    plan: free
+    region: oregon
+    numInstances: 1
+    buildCommand: npm ci && npm run build
+    startCommand: npm run start
+    healthCheckPath: /healthz
+    autoDeployTrigger: off
+    envVars:
+      - key: NODE_VERSION
+        value: 24.13.0
+      - key: NODE_ENV
+        value: production
+      - key: ALLOWED_ORIGINS
+        sync: false
+      - key: SERVE_WEB
+        value: "true"
+      - key: VITE_API_BASE_URL
+        value: ""
+      - key: ROOM_EGRESS_BYTES
+        value: 134217728
+      - key: PROCESS_EGRESS_BYTES
+        value: 268435456

@@ -1,0 +1,31 @@
+{
+  "source": "https://raw.githubusercontent.com/ultralytics/ultralytics/v8.4.146/ultralytics/assets/bus.jpg",
+  "license": "AGPL-3.0 (upstream repository sample)",
+  "sha256": "c02019c4979c191eb739ddd944445ef408dad5679acab6fd520ef9d434bfbc63",
+  "cases": [
+    {
+      "name": "bus",
+      "side": 416,
+      "torchOnnxMaxAbsDelta": 9.1552734375e-05,
+      "detectionsAbove01": 6
+    },
+    {
+      "name": "bus-landscape",
+      "side": 416,
+      "torchOnnxMaxAbsDelta": 0.0001068115234375,
+      "detectionsAbove01": 6
+    },
+    {
+      "name": "bus",
+      "side": 320,
+      "torchOnnxMaxAbsDelta": 9.1552734375e-05,
+      "detectionsAbove01": 5
+    },
+    {
+      "name": "bus-landscape",
+      "side": 320,
+      "torchOnnxMaxAbsDelta": 3.814697265625e-05,
+      "detectionsAbove01": 6
+    }
+  ]
+}

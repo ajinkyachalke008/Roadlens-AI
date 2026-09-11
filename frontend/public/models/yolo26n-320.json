@@ -1,0 +1,123 @@
+{
+  "id": "yolo26n-coco-e2e-320-fp32-v1",
+  "file": "yolo26n-320.onnx",
+  "profile": 320,
+  "sha256": "3462385c62a59f028a400b71ecfa200c53880854f2e5078b73edb3c536d1ba02",
+  "bytes": 9767944,
+  "source": "https://github.com/ultralytics/assets/releases/download/v8.4.0/yolo26n.pt",
+  "checkpointSha256": "9b09cc8bf347f0fc8a5f7657480587f25db09b34bf33b0652110fb03a8ad4fef",
+  "license": "AGPL-3.0",
+  "licenseUrl": "https://www.ultralytics.com/license",
+  "input": {
+    "name": "images",
+    "shape": [
+      1,
+      3,
+      320,
+      320
+    ],
+    "dtype": "float32",
+    "color": "RGB",
+    "layout": "NCHW",
+    "normalization": "divide_255"
+  },
+  "output": {
+    "name": "output0",
+    "shape": [
+      1,
+      300,
+      6
+    ],
+    "dtype": "float32",
+    "format": "yolo_e2e_xyxy_score_class"
+  },
+  "letterbox": {
+    "padding": 114,
+    "rounding": "half_up",
+    "resize": "pixel_center_bilinear_no_antialias",
+    "extraPadding": "bottom_right"
+  },
+  "classMap": {
+    "0": "person",
+    "1": "bicycle",
+    "2": "car",
+    "3": "motorcycle",
+    "5": "bus",
+    "7": "truck"
+  },
+  "classCount": 80,
+  "confidence": {
+    "low": 0.1,
+    "high": 0.5,
+    "newTrack": 0.6
+  },
+  "decoderVersion": "roadlens_decode_v1",
+  "exportOptions": {
+    "format": "onnx",
+    "imgsz": 320,
+    "batch": 1,
+    "dynamic": false,
+    "half": false,
+    "nms": false,
+    "simplify": false,
+    "opset": 17,
+    "device": "cpu"
+  },
+  "exporterVersion": "8.4.146",
+  "torchVersion": "2.14.0",
+  "onnxVersion": "1.20.1",
+  "runtimeVersion": "1.29.0",
+  "graphOperators": [
+    "Add",
+    "Cast",
+    "Concat",
+    "Constant",
+    "ConstantOfShape",
+    "Conv",
+    "Div",
+    "Equal",
+    "Expand",
+    "Flatten",
+    "Gather",
+    "GatherElements",
+    "MatMul",
+    "MaxPool",
+    "Mod",
+    "Mul",
+    "ReduceMax",
+    "Reshape",
+    "Resize",
+    "Shape",
+    "Sigmoid",
+    "Slice",
+    "Softmax",
+    "Split",
+    "Sub",
+    "TopK",
+    "Transpose",
+    "Unsqueeze",
+    "Where"
+  ],
+  "graphMetadata": {
+    "description": "Ultralytics YOLO26n model trained on /home/lq/codes/ultralytics/ultralytics/cfg/datasets/coco.yaml",
+    "author": "Ultralytics",
+    "date": "2026-09-10T17:28:53.297273-07:00",
+    "version": "8.4.146",
+    "license": "AGPL-3.0 License (https://ultralytics.com/license)",
+    "docs": "https://docs.ultralytics.com",
+    "stride": "32",
+    "task": "detect",
+    "head": "Detect",
+    "batch": "1",
+    "imgsz": "[320, 320]",
+    "names": "{0: 'person', 1: 'bicycle', 2: 'car', 3: 'motorcycle', 4: 'airplane', 5: 'bus', 6: 'train', 7: 'truck', 8: 'boat', 9: 'traffic light', 10: 'fire hydrant', 11: 'stop sign', 12: 'parking meter', 13: 'bench', 14: 'bird', 15: 'cat', 16: 'dog', 17: 'horse', 18: 'sheep', 19: 'cow', 20: 'elephant', 21: 'bear', 22: 'zebra', 23: 'giraffe', 24: 'backpack', 25: 'umbrella', 26: 'handbag', 27: 'tie', 28: 'suitcase', 29: 'frisbee', 30: 'skis', 31: 'snowboard', 32: 'sports ball', 33: 'kite', 34: 'baseball bat', 35: 'baseball glove', 36: 'skateboard', 37: 'surfboard', 38: 'tennis racket', 39: 'bottle', 40: 'wine glass', 41: 'cup', 42: 'fork', 43: 'knife', 44: 'spoon', 45: 'bowl', 46: 'banana', 47: 'apple', 48: 'sandwich', 49: 'orange', 50: 'broccoli', 51: 'carrot', 52: 'hot dog', 53: 'pizza', 54: 'donut', 55: 'cake', 56: 'chair', 57: 'couch', 58: 'potted plant', 59: 'bed', 60: 'dining table', 61: 'toilet', 62: 'tv', 63: 'laptop', 64: 'mouse', 65: 'remote', 66: 'keyboard', 67: 'cell phone', 68: 'microwave', 69: 'oven', 70: 'toaster', 71: 'sink', 72: 'refrigerator', 73: 'book', 74: 'clock', 75: 'vase', 76: 'scissors', 77: 'teddy bear', 78: 'hair drier', 79: 'toothbrush'}",
+    "args": "{'data': None, 'batch': 1, 'fraction': 1.0, 'quantize': None, 'nms': False, 'dynamic': False, 'simplify': False, 'opset': 17}",
+    "channels": "3",
+    "end2end": "True"
+  },
+  "testedExecutionProviders": [
+    "wasm"
+  ],
+  "browserParity": "PASS desktop Chromium 153; portrait and padded landscape real photo, IoU > 0.99 and score delta < 0.001",
+  "physicalPhoneBenchmark": "NOT_RUN"
+}

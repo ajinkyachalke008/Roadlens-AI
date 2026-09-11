@@ -1,0 +1,17 @@
+{
+  "version": "1.29.0",
+  "executionProvider": "wasm",
+  "numThreads": 1,
+  "files": [
+    {
+      "name": "ort-wasm-simd-threaded.mjs",
+      "bytes": 24218,
+      "sha256": "5a15f1fd086b3f6c2baf1f35105b8f502653b567e165cef80028870b39748747"
+    },
+    {
+      "name": "ort-wasm-simd-threaded.wasm",
+      "bytes": 13961845,
+      "sha256": "ec8580a9d7b9476ceee52e10a7f94124e4dc71a019d666ed6d4726697c109a4d"
+    }
+  ]
+}

@@ -1,0 +1,47 @@
+# Deployment
+
+The application is prepared for Vercel static hosting and one Render Free relay process. See FINAL_HANDOFF.md for actual URLs and completed checks. Configuration readiness does not establish a cloud deployment.
+
+## Current authorization boundary
+
+The application-source release is authorized; see RELEASE_APPROVAL.md. Vercel Hobby account access is available. Read-only inspection of the authorized Render account shows a payment method and explicit billing beyond included allowances. The user's strict no-overage condition therefore blocks creation of a Render service. No plan, payment method, billing setting or unrelated project was changed.
+
+[Render free services](https://render.com/docs/free) can spin down after15 idle minutes. [Outbound WebSocket traffic](https://render.com/docs/outbound-bandwidth) consumes bandwidth. [Vercel Hobby](https://vercel.com/docs/plans/hobby) is for personal/non-commercial use. Verify current eligibility and account limits before creating resources. No trial credits or anti-sleep bots are used.
+
+The relay's128MiB room and256MiB process-boot content limits include viewer fanout. They exclude transport overhead, other services and static downloads and reset with the process. They cannot guarantee an account-level monthly bill.
+
+## Frontend-only release while relay is blocked
+
+Use the existing vercel.json: repository root, npm ci, npm run build, output frontend/dist, Vite, Node24. Set build environment VITE_SHARING_DISABLED=true. Leave VITE_API_BASE_URL empty. This publishes real camera/replay inference and temporary local reports, with Share/Connect disabled and an explicit status. It provides no remote viewing until an approved relay is deployed. It is not a successful full cloud smoke.
+
+The static application contains matching model/runtime assets. No WebSocket server or neural network runs in Vercel Functions. Do not deploy backend output as a Vercel function.
+
+## Complete split deployment once free-only authorization exists
+
+1. Supply an authorized Render workspace whose no-overage behavior is verified. Do not bypass the current restriction or modify unrelated services.
+2. Create one new Node service from render.yaml, free plan, one instance, npm ci && npm run build:relay, npm run start, health /healthz. No disks, database, add-ons or GPU. Render supplies PORT; server binds0.0.0.0.
+3. Set production ALLOWED_ORIGINS to the exact Vercel HTTPS origin, without a trailing slash. Never use a wildcard. Production rejects unrelated and localhost origins unless explicitly configured for an isolated test.
+4. Set Vercel VITE_API_BASE_URL to the actual relay HTTPS origin and VITE_SHARING_DISABLED=false. Rebuild. The browser uses WSS directly to the relay.
+5. Verify model/runtime MIME, bytes and SHA-256, exact origins and role-bound pairing, then run the full smoke below. Record actual URLs; do not invent a default.
+
+## Single-Render fallback
+
+Use render.single.yaml instead of the split blueprint, only after the same free-only constraint is resolved. Build npm ci && npm run build, start npm run start, SERVE_WEB=true, VITE_API_BASE_URL empty, VITE_SHARING_DISABLED=false, exact service HTTPS origin in ALLOWED_ORIGINS. The same process serves public assets and the RAM relay. Static asset downloads also consume Render bandwidth.
+
+## Validation
+
+npm run deploy:verify validates both Render files against the official complete schema. It validates every configured Vercel property against the official property schema and rejects unknown fields; the upstream schema has an unrelated invalid draft04 experimentalTriggers branch.
+
+npm run test:production starts and stops the compiled single-process application locally and executes the real-model paired browser test. Local tests do not prove provider restart or physical-phone behavior.
+
+After both deployments actually exist:
+
+```powershell
+$env:ROADLENS_BASE_URL='https://<actual-frontend-origin>'
+$env:ROADLENS_RELAY_URL='https://<actual-relay-origin>'
+npm run smoke:cloud
+```
+
+The command rejects missing/localhost origins, checks HTTPS/model/runtime integrity and runs the real analyzed-preview/report flow. Restart the actual deployed relay separately, verify the old code fails, then create a new room from the still-open camera and pair again. Stop development services before a physical phone/cellular + separate-network viewer trial.
+
+Additional delivered commands: npm run test:split-production builds isolated production assets and exercises real paired browsers through distinct local HTTPS/WSS origins. It requires OpenSSL (or ROADLENS_OPENSSL pointing to its executable); temporary self-signed certificates are scoped to loopback tests and cleaned up. npm run smoke:frontend with ROADLENS_BASE_URL checks a real public camera-only deployment against the source-controlled manifests and executes the @frontend real-inference/local-report flow. Neither substitutes for smoke:cloud.

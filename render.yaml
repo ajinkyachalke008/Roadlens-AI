@@ -1,0 +1,24 @@
+services:
+  - type: web
+    name: roadlens-relay
+    runtime: node
+    plan: free
+    region: oregon
+    numInstances: 1
+    buildCommand: npm ci && npm run build:relay
+    startCommand: npm run start
+    healthCheckPath: /healthz
+    autoDeployTrigger: off
+    envVars:
+      - key: NODE_VERSION
+        value: 24.13.0
+      - key: NODE_ENV
+        value: production
+      - key: ALLOWED_ORIGINS
+        sync: false
+      - key: SERVE_WEB
+        value: "false"
+      - key: ROOM_EGRESS_BYTES
+        value: 134217728
+      - key: PROCESS_EGRESS_BYTES
+        value: 268435456

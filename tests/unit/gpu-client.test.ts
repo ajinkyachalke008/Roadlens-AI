@@ -2,6 +2,7 @@ import { afterEach, expect, it, vi } from "vitest";
 import { RemoteDetector } from "../../frontend/src/inference/remote";
 import { CameraCapture } from "../../frontend/src/camera/capture";
 import { decodeGpuFrame, type GpuIdentity } from "../../shared/src/gpu";
+import { GPU_LIMITS } from "../../shared/src/limits";
 import { epoch, sourceId, uuid } from "../contracts/fixtures";
 const jpeg = new Uint8Array([
   255, 216, 255, 192, 0, 11, 8, 1, 104, 2, 128, 1, 1, 17, 0, 255, 218, 0, 8, 1,
@@ -106,13 +107,37 @@ it("GPU client binds capability in first message only, never URL", async () => {
   });
   c.close();
 });
-it("one active frame and exact source/dimension match; duplicates ignored", async () => {
+const spaceSends = () =>
+  new Promise((resolve) => setTimeout(resolve, 1000 / GPU_LIMITS.maxHz + 10));
+it("bounded frames in flight, exact source/dimension match, duplicates ignored", async () => {
   const c = await connected();
   const done = c.detect(canvas, identity);
   await tick();
+  // Inside the send-rate floor a frame is dropped, never queued.
   await expect(c.detect(canvas, { ...identity, frameSeq: 2 })).rejects.toThrow(
-    "busy",
+    "rate limited",
   );
+  // Past the floor the pipeline admits a second frame, and no more.
+  await spaceSends();
+  const second = c
+    .detect(canvas, {
+      ...identity,
+      frameSeq: 3,
+      frameId: `${epoch}:3`,
+      sourceTimeMs: 1600,
+    })
+    .catch((error) => error);
+  await tick();
+  expect(c.diagnostics.inFlight).toBe(GPU_LIMITS.maxInFlight);
+  await spaceSends();
+  await expect(
+    c.detect(canvas, {
+      ...identity,
+      frameSeq: 4,
+      frameId: `${epoch}:4`,
+      sourceTimeMs: 1700,
+    }),
+  ).rejects.toThrow("busy");
   const packet = Socket.instance.sent.find(
     (v) => v instanceof ArrayBuffer,
   ) as ArrayBuffer;
@@ -130,8 +155,13 @@ it("one active frame and exact source/dimension match; duplicates ignored", asyn
   expect((await done).frameId).toBe(identity.frameId);
   Socket.instance.receive(result(frame));
   expect(c.diagnostics.completed).toBe(1);
-  expect(c.diagnostics.dropped).toBe(3);
+  // Rate-limited frame, in-flight-bound frame, mismatched result, duplicate result.
+  expect(c.diagnostics.dropped).toBe(4);
+  // Completing the first frame frees exactly one slot; the second still flies.
+  expect(c.diagnostics.inFlight).toBe(1);
   c.close();
+  expect(await second).toBeInstanceOf(Error);
+  expect(c.diagnostics.inFlight).toBe(0);
 });
 it("timeouts reject retained work and explicitly notify fallback", async () => {
   const c = await connected();

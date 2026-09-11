@@ -29,6 +29,10 @@ import type { FrameRateChoice } from "../camera/frameRate";
 import { Reports } from "../components/Reports";
 import { Drawer } from "../components/Drawer";
 import { CalibrationDrawer } from "../components/CalibrationDrawer";
+import { calibrationQuality } from "../geometry/calibration";
+import { SpeedValidationDrawer } from "../components/SpeedValidationDrawer";
+import { SpeedValidationSession } from "../validation/speedTrial";
+import type { SpeedEstimate } from "../geometry/speed";
 import { speedFactor, type SpeedUnit } from "../components/speedUnits";
 import { RemoteDetector } from "../inference/remote";
 export default function Camera() {
@@ -46,8 +50,12 @@ export default function Camera() {
   const [viewers, setViewers] = useState(0);
   const [remaining, setRemaining] = useState<number | null>(null);
   const [drawer, setDrawer] = useState<
-    "settings" | "calibration" | "end" | null
+    "settings" | "calibration" | "validation" | "end" | null
   >(null);
+  // Session-scoped, RAM-only, cleared with everything else at End session.
+  const validation = useRef(new SpeedValidationSession());
+  const [validationRevision, setValidationRevision] = useState(0);
+  const estimates = useRef(new Map<number, SpeedEstimate>());
   const [evidence, setEvidence] = useState(false);
   const evidenceRef = useRef(false);
   const [profile, setProfile] = useState<416 | 320>(416);
@@ -258,6 +266,7 @@ export default function Camera() {
       }
     };
     c.onFrame = (completed: CompletedFrame) => {
+      estimates.current = completed.estimates;
       setFrame({
         result: completed.result,
         image: completed.canvas,
@@ -268,7 +277,11 @@ export default function Camera() {
       });
       setCalibrationStatus(
         c.calibration
-          ? `${c.background === "verified" ? "Background checked" : "Background unverified"} · measured setup`
+          ? `${c.background === "verified" ? "Background checked" : "Background unverified"} · ${
+              calibrationQuality(c.calibration).grade === "valid"
+                ? "measured setup"
+                : "weak calibration · re-measure"
+            }`
           : c.background === "camera_moved"
             ? "Camera moved · recalibrate"
             : "Handheld / uncalibrated · detection only",
@@ -669,6 +682,13 @@ export default function Camera() {
             Calibrate
           </button>
           <button
+            onClick={() => setDrawer("validation")}
+            disabled={!frame}
+            title="Record measured speed against an independent reference"
+          >
+            Validate speed
+          </button>
+          <button
             onClick={() => {
               const latest = capture.current?.latest;
               if (latest)
@@ -978,6 +998,14 @@ export default function Camera() {
                     data-worker-total-ms={d.worker?.totalMs ?? ""}
                     data-worker-decode-ms={d.worker?.decodeMs ?? ""}
                     data-gpu-inference-ms={d.worker?.inferenceMs ?? ""}
+                    data-in-flight={d.inFlight}
+                    data-max-in-flight={d.maxInFlight}
+                    data-superseded={
+                      capture.current?.frameDiagnostics.supersededResults ?? 0
+                    }
+                    data-stale={
+                      capture.current?.frameDiagnostics.staleResults ?? 0
+                    }
                   >
                     <dt>Model / runtime</dt>
                     <dd>
@@ -1021,8 +1049,16 @@ export default function Camera() {
                     </dd>
                     <dt>Camera tracking</dt>
                     <dd>{d.trackingMs.toFixed(2)} ms</dd>
-                    <dt>Analysis sent / in-flight limit</dt>
-                    <dd>{(d.bytes / 1048576).toFixed(2)} MiB / 1</dd>
+                    <dt>Analysis sent / in flight</dt>
+                    <dd>
+                      {(d.bytes / 1048576).toFixed(2)} MiB / {d.inFlight} of{" "}
+                      {d.maxInFlight}
+                    </dd>
+                    <dt>Superseded / stale results</dt>
+                    <dd>
+                      {capture.current?.frameDiagnostics.supersededResults ?? 0}{" "}
+                      / {capture.current?.frameDiagnostics.staleResults ?? 0}
+                    </dd>
                   </dl>
                 );
               })()}
@@ -1042,6 +1078,10 @@ export default function Camera() {
                     data-source-hz={d.sourceHz}
                     data-accepted-hz={d.acceptedHz}
                     data-analysis-hz={d.analysisHz}
+                    data-in-flight={d.inFlight}
+                    data-max-in-flight={d.maxInFlight}
+                    data-superseded={d.supersededResults}
+                    data-stale={d.staleResults}
                   >
                     <dt>Source mode / scheduler</dt>
                     <dd>
@@ -1233,14 +1273,34 @@ export default function Camera() {
           </p>
         </Drawer>
       )}
+      {drawer === "validation" && (
+        <SpeedValidationDrawer
+          session={validation.current}
+          revision={validationRevision}
+          frame={frame?.result ?? null}
+          estimates={estimates.current}
+          calibrationVersion={
+            capture.current?.calibration?.version ?? null
+          }
+          speedUnit={speedUnit}
+          onChange={() => setValidationRevision((n) => n + 1)}
+          onClose={() => setDrawer(null)}
+        />
+      )}
       {drawer === "end" && (
         <Drawer title="End this session?" onClose={() => setDrawer(null)}>
-          <p>Unexported reports, images and calibration will be cleared.</p>
+          <p>
+            Unexported reports, images, calibration and speed-validation trials
+            will be cleared.
+          </p>
           <button
             className="primary"
             onClick={() => {
               capture.current?.end();
               store.clear();
+              validation.current.clear();
+              estimates.current = new Map();
+              setValidationRevision(0);
               setFrame(null);
               setStatus("Ended");
               statusRef.current = "Ended";

@@ -156,6 +156,51 @@ export function solveHomography(pairs: Correspondence[]): number[] {
   const divisor = Math.abs(h[8]!) > 1e-9 ? h[8]! : Math.hypot(...h);
   return h.map((value) => value / divisor);
 }
+/**
+ * Grade an accepted calibration. `createCalibration` already refuses anything
+ * that fails a gate, so an existing Calibration is never "invalid" here: the
+ * distinction that matters to an operator is whether it passed comfortably or
+ * only just. "Weak" is a warning to re-measure, not a reason to hide speed.
+ */
+export type CalibrationGrade = "valid" | "weak";
+export interface CalibrationQuality {
+  grade: CalibrationGrade;
+  /** Empty when valid; each entry names one marginal property. */
+  reasons: string[];
+  /** Worst gate usage as a fraction of its tolerance, 0–1. */
+  worstMargin: number;
+}
+/** Below this fraction of a gate's tolerance a property is comfortable. */
+const weakFraction = 0.6;
+export function calibrationQuality(c: Calibration): CalibrationQuality {
+  const tolerance = Math.max(0.5, c.check.checkedLengthM * 0.05);
+  const reasons: string[] = [];
+  const margins = [
+    c.independentErrorM / tolerance,
+    c.fitResidualM / tolerance,
+  ];
+  if (c.independentErrorM > tolerance * weakFraction)
+    reasons.push(
+      `independent check ${c.independentErrorM.toFixed(2)} m of ${tolerance.toFixed(2)} m allowed`,
+    );
+  // Four points determine a homography exactly, so the fit residual is zero by
+  // construction and carries no information. It is only evidence when the
+  // system is over-determined; the independent check point, which is never
+  // fitted, is what detects a mis-measurement in the four-point case.
+  const overDetermined = c.pairs.length > 4;
+  if (overDetermined && c.fitResidualM > tolerance * weakFraction)
+    reasons.push(
+      `fit residual ${c.fitResidualM.toFixed(2)} m of ${tolerance.toFixed(2)} m allowed`,
+    );
+  return {
+    grade: reasons.length ? "weak" : "valid",
+    reasons,
+    worstMargin: Math.min(
+      1,
+      overDetermined ? Math.max(...margins) : margins[0]!,
+    ),
+  };
+}
 export function createCalibration(input: CalibrationInput): Calibration {
   if (!input.stationaryConfirmed) throw new Error("handheld");
   if (

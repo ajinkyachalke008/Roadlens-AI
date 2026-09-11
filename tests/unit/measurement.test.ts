@@ -8,12 +8,14 @@ import {
   type TrackedObject,
 } from "../../frontend/src/tracking/tracker";
 import {
+  calibrationQuality,
   createCalibration,
   insidePolygon,
   project,
   solveHomography,
   validPolygon,
   type CalibrationInput,
+  type Point,
 } from "../../frontend/src/geometry/calibration";
 import {
   estimateSpeed,
@@ -539,5 +541,87 @@ describe("B21 current presence and directed finite-line crossings", () => {
     c.update([at(0.5, 0.4)], "a", line);
     c.update([], "a", line);
     expect(c.update([at(0.5, 0.6)], "a", line).forward).toBe(0);
+  });
+});
+
+describe("calibration quality grading", () => {
+  // A real planar homography: world coordinates are produced from the image
+  // points through H, so the correspondences are exactly consistent and any
+  // residual in a test comes from a deliberate perturbation.
+  const H = [12, 0.4, -3.2, 0.6, 9.5, -4.1, 0.02, -0.9, 1];
+  const imagePoints: Point[] = [
+    [0.2, 0.8],
+    [0.8, 0.8],
+    [0.78, 0.55],
+    [0.22, 0.55],
+    [0.5, 0.66],
+  ];
+  const checkImage: Point = [0.5, 0.8];
+  const worldOf = (image: Point) => {
+    const world = project(H, image);
+    if (!world) throw new Error("test homography degenerate");
+    return world;
+  };
+  const base = (): CalibrationInput => ({
+    pairs: imagePoints.map((image) => ({ image, world: worldOf(image) })),
+    check: {
+      image: checkImage,
+      world: worldOf(checkImage),
+      checkedLengthM: 10,
+    },
+    zone: [
+      [0.21, 0.79],
+      [0.79, 0.79],
+      [0.77, 0.56],
+      [0.23, 0.56],
+    ],
+    frameWidth: 1280,
+    frameHeight: 720,
+    captureEpoch: "epoch",
+    stationaryConfirmed: true,
+  });
+  it("grades a comfortable five-point calibration valid", () => {
+    const quality = calibrationQuality(createCalibration(base()));
+    expect(quality.grade).toBe("valid");
+    expect(quality.reasons).toEqual([]);
+    expect(quality.worstMargin).toBeLessThan(0.6);
+  });
+  it("judges an exactly-determined fit by its independent check alone", () => {
+    const input = base();
+    input.pairs = input.pairs.slice(0, 4);
+    const calibration = createCalibration(input);
+    // Four points fit exactly, so the residual is structurally zero and must
+    // not contribute to the grade in either direction.
+    expect(calibration.fitResidualM).toBeLessThan(1e-6);
+    const quality = calibrationQuality(calibration);
+    expect(quality.grade).toBe("valid");
+    expect(quality.worstMargin).toBeCloseTo(
+      calibration.independentErrorM / 0.5,
+      6,
+    );
+  });
+  it("grades a four-point fit weak when its independent check is marginal", () => {
+    const input = base();
+    input.pairs = input.pairs.slice(0, 4);
+    const exact = input.check.world;
+    // Mis-measure the check by 0.4 m: inside the 0.5 m gate, past 60% of it.
+    input.check = { ...input.check, world: [exact[0] + 0.4, exact[1]] };
+    const quality = calibrationQuality(createCalibration(input));
+    expect(quality.grade).toBe("weak");
+    expect(quality.reasons.join(" ")).toContain("independent check");
+    expect(quality.worstMargin).toBeGreaterThan(0.6);
+  });
+  it("names the marginal property when a gate is nearly exhausted", () => {
+    const input = base();
+    const exact = input.pairs[4]!.world;
+    // Mis-measure one world point by 0.35 m: inside the 0.5 m gate, past 60%.
+    input.pairs[4] = {
+      image: input.pairs[4]!.image,
+      world: [exact[0] + 0.35, exact[1]],
+    };
+    const quality = calibrationQuality(createCalibration(input));
+    expect(quality.grade).toBe("weak");
+    expect(quality.reasons.join(" ")).toMatch(/fit residual|independent check/);
+    expect(quality.worstMargin).toBeGreaterThan(0.6);
   });
 });

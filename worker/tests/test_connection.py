@@ -112,20 +112,44 @@ class ConnectionTests(unittest.IsolatedAsyncioTestCase):
         self.assertNotIn(SECRET, str(self.logs))
         self.assertNotIn("detections", socket.sent[1])
 
-    async def test_single_active_zero_queue_busy_and_cancel_ack(self):
+    def _results(self, socket):
+        return [m["frameId"] for m in socket.sent if m["type"] == "inference.result"]
+
+    async def test_one_active_call_with_a_single_waiting_slot_and_cancel_ack(self):
         socket, _ = self.start()
         await until(lambda: self.client.ready)
         socket.feed(packet())
         await until(self.detector.started.is_set)
         socket.feed(packet(header(2)))
         socket.feed(dict(v=1, type="camera.cancel", roomId=ROOM))
-        await until(lambda: any(m.get("code") == "busy" for m in socket.sent))
+        await asyncio.sleep(.05)
+        # Exactly one native call runs; the second frame waits rather than
+        # executing concurrently, and is not refused.
         self.assertEqual(self.detector.calls, 1)
+        self.assertFalse(any(m.get("code") == "busy" for m in socket.sent))
         self.detector.release.set()
-        await until(lambda: any(m["type"] == "inference.result" for m in socket.sent))
-        result = next(m for m in socket.sent if m["type"] == "inference.result")
-        self.assertEqual(result["frameId"], f"{EPOCH}:1")
+        await until(lambda: len(self._results(socket)) == 2)
+        # Cancel never abandons work already accepted; both identities complete
+        # in submission order and the relay fences anything it no longer wants.
+        self.assertEqual(self._results(socket), [f"{EPOCH}:1", f"{EPOCH}:2"])
+        self.assertEqual(self.detector.calls, 2)
+
+    async def test_newest_frame_displaces_the_waiting_frame_without_queueing(self):
+        socket, _ = self.start()
+        await until(lambda: self.client.ready)
+        socket.feed(packet())
+        await until(self.detector.started.is_set)
+        socket.feed(packet(header(2)))
+        socket.feed(packet(header(3)))
+        await until(lambda: any(m.get("code") == "busy" for m in socket.sent))
+        # The older waiting frame is released immediately; depth never exceeds two.
+        self.assertEqual([m["frameId"] for m in socket.sent if m.get("code") == "busy"], [f"{EPOCH}:2"])
         self.assertEqual(self.detector.calls, 1)
+        self.assertIsNotNone(self.client.queued)
+        self.detector.release.set()
+        await until(lambda: len(self._results(socket)) == 2)
+        self.assertEqual(self._results(socket), [f"{EPOCH}:1", f"{EPOCH}:3"])
+        self.assertIsNone(self.client.queued)
 
     async def test_disconnect_fences_result_and_delays_next_registration(self):
         old, old_task = self.start()

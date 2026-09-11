@@ -57,6 +57,57 @@ WebP halves the payload and costs 4.5× the encode time on the capture device, w
 
 The whole spread between fast and quality is 2.9 ms of a 100–290 ms cycle: under 3%. A Fast/Balanced/Quality control is an accuracy control, not a smoothness control, and it cannot be a browser control at all today — the worker binds one model at process start from `ROADLENS_MODEL_MODE`, and there is no protocol message to change it. The mode therefore stays operator-selected at worker start, and the camera shows which model and runtime are actually connected. Balanced remains the default; the measurements give no reason to change it.
 
-## One frame in flight
+## Two frames in flight — measured and adopted
+
+Measured September 11, 2026 as a matched A/B: the same harness, the same machine
+state, the same 25-second runs back to back, with `GPU_LIMITS.maxInFlight` the
+only difference between the two builds. Artifacts:
+`docs/evidence/pipeline-ab-inflight1.json` and `pipeline-ab-inflight2.json`.
+
+| Added latency | Measured RTT | AI Hz (1 → 2) | Result age (1 → 2) | Overlay age (1 → 2) | Superseded | Stale |
+| ------------- | ------------ | ------------- | ------------------ | ------------------- | ---------- | ----- |
+| 0 ms          | 0.9 ms       | 10.01 → 10.00 | 16 → 21 ms         | 118 → 128 ms        | 0          | 0     |
+| 60 ms         | 61.7 ms      | 9.91 → 10.01  | 78 → 83 ms         | 189 → 189 ms        | 0          | 0     |
+| 120 ms        | 125.0 ms     | 5.01 → 10.00  | 146 → 146 ms       | 355 → 253 ms        | 0          | 0     |
+| 200 ms        | 207.0 ms     | 3.34 → 6.67   | 230 → 224 ms       | 536 → 385 ms        | 0          | 0     |
+
+**Adopted: 2.** What the numbers say:
+
+- **The gain is exactly where the model predicts it.** Where round trip dominates,
+  the completed-analysis rate doubles: 5.01 → 10.00 Hz at 125 ms and 3.34 → 6.67 Hz
+  at 207 ms. Where it does not — 0 ms and 60 ms, already pinned by the 71.7 ms
+  protocol send floor and the 20 FPS synthetic camera's 50 ms quantisation —
+  nothing changes, because there was nothing to win.
+- **Overlay age falls by about 29%** at both high-latency points (355 → 253 ms,
+  536 → 385 ms). This is what the eye actually sees.
+- **Result age is unchanged**, as it must be. Depth does not shorten one frame's
+  journey; it overlaps journeys. Any implementation that appeared to reduce result
+  age would be measuring the wrong thing.
+- **No correctness cost.** `superseded` and `stale` are zero in every run: not one
+  completion arrived after a newer one had committed, and not one exceeded the
+  700 ms discard ceiling. The ordering gate was never needed in these conditions,
+  which is the point of having it.
+- **It unblocks speed at high latency.** The estimator requires at least 4 Hz
+  effective sampling with no gap over 350 ms. At 207 ms RTT one frame in flight
+  delivers 3.34 Hz, so speed is refused as `sampling_too_sparse` no matter how
+  good the calibration is. Two frames deliver 6.67 Hz, which clears the gate. On a
+  hosted relay over cellular, depth is what makes measurement possible at all.
+
+The 60 ms row is bimodal across runs (7.99 Hz in the earlier single-depth
+baseline, 9.91 Hz here) because the adaptive interval lands near the 20 FPS
+camera's 50 ms grid and can settle on either 100 ms or 150 ms spacing. That is an
+artifact of the synthetic 20 FPS capture device, not of the pipeline; a 30 or
+60 FPS camera quantises finer.
+
+### Rollout ordering
+
+The relay must be deployed before the frontend. A new relay accepts one or two
+outstanding frames, so an old client is unaffected. A new client against an old
+relay still works — the second frame is refused with `busy`, which the client
+treats as a normal drop — but it pays a raised congestion floor for every
+refusal, so it degrades rather than failing. Deploying the relay first avoids
+that window entirely.
+
+## One frame in flight — superseded, retained for history
 
 `RemoteDetector` keeps one outstanding GPU frame, so analysis Hz is bounded by the full round trip, as the table shows. Raising that bound is not a client-side change: `backend/src/gpu.ts` rejects a second frame with `inference.error code=busy` while one is pending, and `worker/connection.py` does the same while native work is active. Two frames in flight therefore needs the browser client, the relay lease and the worker changed together, plus contract tests for the new ordering, and a version skew during rollout degrades to continuous `busy` drops. The measured gain would be real — roughly double the analysis Hz and half the overlay age wherever round trip dominates — so it is recorded here as the next measured step, not adopted in this release.

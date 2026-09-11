@@ -28,6 +28,9 @@ export interface GpuDiagnostics {
   backoffMs: number;
   submittedHz: number;
   resultHz: number;
+  /** Frames submitted and not yet resolved. Never exceeds maxInFlight. */
+  inFlight: number;
+  maxInFlight: number;
 }
 export class GpuUnavailableError extends Error {}
 /** Transient congestion drops this frame without invalidating the GPU connection. */
@@ -38,13 +41,29 @@ interface FrameOperation {
   timer: ReturnType<typeof setTimeout>;
   canvas: HTMLCanvasElement;
   started: number;
+  /** Set once this operation has actually submitted an identity. */
+  frameId: string | null;
 }
 
-/** One outstanding frame. CameraCapture retains its exact canvas until this promise completes. */
+interface PendingJob {
+  identity: GpuIdentity;
+  resolve: (value: GpuResult) => void;
+  reject: (error: Error) => void;
+  started: number;
+}
+
+/**
+ * Bounded analysis pipeline, at most `GPU_LIMITS.maxInFlight` outstanding frames.
+ * CameraCapture retains each frame's exact canvas until its promise completes.
+ * Results may only be correlated by exact frame identity, never by arrival order.
+ */
 export class RemoteDetector {
   descriptor: GpuDescriptor | null = null;
   ready = false;
-  private measurements: Omit<GpuDiagnostics, "submittedHz" | "resultHz"> = {
+  private measurements: Omit<
+    GpuDiagnostics,
+    "submittedHz" | "resultHz" | "inFlight" | "maxInFlight"
+  > = {
     backoffMs: 1000 / GPU_LIMITS.maxHz + 5,
     submitted: 0,
     completed: 0,
@@ -74,21 +93,40 @@ export class RemoteDetector {
       ...this.measurements,
       submittedHz: rate(this.submittedTimes),
       resultHz: rate(this.completedTimes),
+      inFlight: this.pending.size,
+      maxInFlight: this.maxInFlight,
     };
   }
   onUnavailable = (_reason: string) => {};
   private socket: WebSocket | null = null;
   private disposed = false;
+  /** True only while a frame is being scaled and JPEG-encoded, not while it flies. */
   private encoding = false;
   // Connection-wide: source/seek epochs must not reset the relay's rate ceiling.
   private lastSuccessfulSendAt = -Infinity;
-  private operation: FrameOperation | null = null;
-  private pending: {
-    identity: GpuIdentity;
-    resolve: (value: GpuResult) => void;
-    reject: (error: Error) => void;
-    started: number;
-  } | null = null;
+  /** Every unfinished encode/round trip. Each owns its own abort and timer. */
+  private operations = new Set<FrameOperation>();
+  /** Submitted, unresolved frames by frameId. Bounded by maxInFlight. */
+  private pending = new Map<string, PendingJob>();
+  /**
+   * Pipeline depth actually used on this connection. It starts at the protocol
+   * ceiling and drops to 1 permanently if the relay proves it only accepts one
+   * outstanding frame — which is exactly what a relay deployed before this
+   * client does. `gpu.status` is a `.strict()` schema, so the depth cannot be
+   * advertised without breaking older clients; discovering it from refusals
+   * needs no protocol change and makes deployment order harmless.
+   */
+  private effectiveMaxInFlight: number = GPU_LIMITS.maxInFlight;
+  /** Refusals seen while more than one frame was outstanding. */
+  private concurrentBusy = 0;
+  /**
+   * Occasional refusals are races against the relay's own send-rate floor, not
+   * evidence of depth 1. Three systematic refusals are.
+   */
+  private static readonly busyBeforeDowngrade = 3;
+  get maxInFlight() {
+    return this.effectiveMaxInFlight;
+  }
   private heartbeat: ReturnType<typeof setInterval> | null = null;
   private ping: { nonce: number; started: number } | null = null;
   constructor(
@@ -174,18 +212,35 @@ export class RemoteDetector {
               this.ping = null;
             }
           } else if (m.type === "inference.error") {
-            if (
-              m.roomId === this.pending?.identity.roomId &&
-              m.frameId === this.pending.identity.frameId
-            ) {
+            const job = this.pending.get(m.frameId);
+            if (job && m.roomId === job.identity.roomId) {
               if (m.code === "busy") {
-                const job = this.pending;
-                this.pending = null;
+                // Refused while another frame was already outstanding: the
+                // relay may be an older one that admits only a single frame.
+                const concurrent = this.pending.size > 1;
+                this.pending.delete(m.frameId);
+                if (
+                  concurrent &&
+                  this.effectiveMaxInFlight > 1 &&
+                  ++this.concurrentBusy >=
+                    RemoteDetector.busyBeforeDowngrade
+                ) {
+                  this.effectiveMaxInFlight = 1;
+                  // Capacity discovery, not congestion: the submission rate
+                  // must not be penalised for learning the relay's depth.
+                  this.measurements.dropped++;
+                  job.reject(
+                    new GpuDroppedFrameError(
+                      "GPU accepts one frame at a time; frame dropped",
+                    ),
+                  );
+                  return;
+                }
                 job.reject(this.drop("GPU worker busy; frame dropped"));
               } else this.unavailable("GPU analysis unavailable");
             }
           } else {
-            const job = this.pending;
+            const job = this.pending.get(m.frameId);
             // Duplicates, canceled work and unrelated IDs never get a retained image.
             if (!job || !sameGpuFrame(job.identity, m)) {
               this.measurements.dropped++;
@@ -204,16 +259,19 @@ export class RemoteDetector {
               this.unavailable("GPU result expired");
               return;
             }
-            this.pending = null;
+            this.pending.delete(m.frameId);
             this.measurements.completed++;
             this.completedTimes.push(performance.now());
             this.completedTimes = this.completedTimes.slice(-80);
             this.measurements.resultAgeMs = age;
             this.measurements.worker = m.metrics;
-            // One active job is the primary backpressure. Smooth the measured service cycle.
+            // Bounded in-flight depth is the primary backpressure. To keep
+            // `maxInFlight` frames outstanding on a cycle of `age`, submit every
+            // `age / maxInFlight`; the 1.15 factor leaves headroom so the depth
+            // is approached rather than exceeded, and drops stay rare.
             const desired = Math.max(
               minimumSendIntervalMs,
-              Math.min(1000, age * 1.15),
+              Math.min(1000, (age * 1.15) / this.maxInFlight),
             );
             this.measurements.intervalMs = Math.max(
               minimumSendIntervalMs,
@@ -240,7 +298,9 @@ export class RemoteDetector {
   ): Promise<GpuResult> {
     if (!this.ready || this.disposed || !this.socket)
       throw new GpuUnavailableError("GPU worker unavailable");
-    if (this.pending || this.encoding)
+    // One encode at a time keeps the capture thread predictable; encoding is a
+    // few milliseconds against a submission interval an order of magnitude larger.
+    if (this.pending.size >= this.maxInFlight || this.encoding)
       throw this.drop("GPU worker busy; frame dropped");
     if (performance.now() - this.lastSuccessfulSendAt < minimumSendIntervalMs)
       throw this.drop("GPU send rate limited; frame dropped");
@@ -251,13 +311,14 @@ export class RemoteDetector {
       controller: new AbortController(),
       canvas: scaled,
       started,
+      frameId: null,
       // Covers JPEG encoding, Blob reads and the network/GPU round trip together.
       timer: setTimeout(
         () => this.unavailable("GPU analysis timed out"),
         GPU_LIMITS.frameTimeoutMs,
       ),
     };
-    this.operation = operation;
+    this.operations.add(operation);
     try {
       const scale = Math.min(
         1,
@@ -307,7 +368,7 @@ export class RemoteDetector {
       );
       if (
         this.socket.bufferedAmount + packet.byteLength >
-        GPU_LIMITS.messageBytes
+        GPU_LIMITS.messageBytes * this.maxInFlight
       )
         throw this.drop("GPU network is congested; frame dropped");
       if (performance.now() - this.lastSuccessfulSendAt < minimumSendIntervalMs)
@@ -315,8 +376,17 @@ export class RemoteDetector {
       this.measurements.encodeMs = performance.now() - started;
       return await this.waitForOperation(
         new Promise<GpuResult>((resolve, reject) => {
-          this.pending = { identity: frame, resolve, reject, started };
+          this.pending.set(frame.frameId, {
+            identity: frame,
+            resolve,
+            reject,
+            started,
+          });
+          operation.frameId = frame.frameId;
           this.socket!.send(packet.buffer as ArrayBuffer);
+          // The capture thread is free the moment the packet is queued; only the
+          // round trip remains, and that is what the in-flight bound governs.
+          this.encoding = false;
           this.lastSuccessfulSendAt = performance.now();
           this.measurements.submitted++;
           this.submittedTimes.push(this.lastSuccessfulSendAt);
@@ -327,10 +397,10 @@ export class RemoteDetector {
       );
     } finally {
       clearTimeout(operation.timer);
-      if (this.operation === operation) {
-        this.operation = null;
-        this.pending = null;
-      }
+      this.operations.delete(operation);
+      // Whether it resolved, dropped or aborted, this identity is finished.
+      if (operation.frameId) this.pending.delete(operation.frameId);
+      // Idempotent: already cleared at send, still required on an early throw.
       this.encoding = false;
       scaled.width = 1;
       scaled.height = 1;
@@ -367,7 +437,7 @@ export class RemoteDetector {
       promise.then(
         (value) => {
           signal.removeEventListener("abort", canceled);
-          if (signal.aborted || this.disposed || this.operation !== operation) {
+          if (signal.aborted || this.disposed || !this.operations.has(operation)) {
             canceled();
             return;
           }
@@ -402,18 +472,17 @@ export class RemoteDetector {
     this.ping = null;
     this.submittedTimes = [];
     this.completedTimes = [];
-    if (this.operation) {
-      clearTimeout(this.operation.timer);
-      this.operation.controller.abort();
-      this.operation.canvas.width = 1;
-      this.operation.canvas.height = 1;
-      this.operation = null;
+    for (const operation of this.operations) {
+      clearTimeout(operation.timer);
+      operation.controller.abort();
+      operation.canvas.width = 1;
+      operation.canvas.height = 1;
     }
+    this.operations.clear();
     this.encoding = false;
-    if (this.pending) {
-      this.pending.reject(new GpuUnavailableError("GPU result canceled"));
-      this.pending = null;
-    }
+    for (const job of this.pending.values())
+      job.reject(new GpuUnavailableError("GPU result canceled"));
+    this.pending.clear();
     if (this.socket) {
       if (this.socket.readyState === WebSocket.OPEN)
         this.socket.send(

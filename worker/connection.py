@@ -1,4 +1,11 @@
-"""Outbound connection with one native inference call and no application queue."""
+"""Outbound connection with one native inference call and a single-slot handoff.
+
+At most one CUDA execution runs at a time. Exactly one newest frame may wait
+behind it, so the round trip of frame N overlaps the native work of frame N+1
+without ever forming a queue: a third frame displaces the waiting one, which is
+reported busy immediately. The relay and the browser client enforce the same
+ceiling, so displacement is a defensive path rather than a normal one.
+"""
 import asyncio
 from concurrent.futures import ThreadPoolExecutor
 from contextlib import suppress
@@ -21,6 +28,8 @@ class WorkerConnection:
         self.register_seconds = register_seconds
         self.stop = asyncio.Event()
         self.active = None
+        # At most one (header, image) waiting behind the active native call.
+        self.queued = None
         self.socket = None
         self.generation = 0
         self.last_pong = 0.0
@@ -30,6 +39,17 @@ class WorkerConnection:
 
     async def _send(self, socket, message):
         await asyncio.wait_for(socket.send(protocol.encode(message)), timeout=2)
+
+    async def _process_chain(self, socket, generation, header, image):
+        """Run this frame, then at most the one newest frame waiting behind it."""
+        while True:
+            await self._process(socket, generation, header, image)
+            header = image = None
+            if self.queued is None or self.generation != generation or self.stop.is_set():
+                self.queued = None
+                return
+            header, image = self.queued
+            self.queued = None
 
     async def _process(self, socket, generation, header, image):
         try:
@@ -106,10 +126,16 @@ class WorkerConnection:
                     header, image = protocol.frame(raw)
                     raw = None
                     if self.active is not None and not self.active.done():
-                        await self._send(socket, self._error(header, "busy"))
+                        if self.queued is not None:
+                            displaced, _stale = self.queued
+                            # Bounded depth: the newest frame is always the useful
+                            # one, so the older waiting frame is released at once.
+                            self.queued = None
+                            await self._send(socket, self._error(displaced, "busy"))
+                        self.queued = (header, image)
                         del image, header
                         continue
-                    self.active = asyncio.create_task(self._process(socket, generation, header, image))
+                    self.active = asyncio.create_task(self._process_chain(socket, generation, header, image))
                     del image, header
                 else:
                     message = protocol.control(raw)
@@ -128,6 +154,7 @@ class WorkerConnection:
             self.ready = False
             self.generation += 1
             self.socket = None
+            self.queued = None
             if heartbeat:
                 heartbeat.cancel()
                 with suppress(asyncio.CancelledError):

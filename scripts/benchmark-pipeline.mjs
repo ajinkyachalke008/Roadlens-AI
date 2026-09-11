@@ -80,15 +80,27 @@ const worker = spawn("worker/.venv/Scripts/python.exe", ["-m", "worker.main"], {
   stdio: ["ignore", "pipe", "pipe"],
   windowsHide: true,
 });
-worker.stderr?.on("data", (data) => {
-  const text = String(data);
-  if (/error|traceback/i.test(text)) process.stderr.write(text);
+const workerLog = [];
+for (const stream of [worker.stdout, worker.stderr])
+  stream?.on("data", (data) => {
+    const text = String(data);
+    workerLog.push(text);
+    if (workerLog.length > 200) workerLog.shift();
+    if (/error|traceback|not ready/i.test(text)) process.stderr.write(text);
+  });
+// A worker that exits during startup must fail the run loudly, not silently
+// stall the readiness poll until its timeout.
+let workerExit = null;
+worker.on("exit", (code, signal) => {
+  workerExit = `GPU worker exited early (code ${code}, signal ${signal}).
+${workerLog.join("")}`;
 });
 
 const runs = [];
 let encoding = null;
 try {
   await poll(async () => {
+    if (workerExit) throw new Error(workerExit);
     try {
       const response = await fetch(origin + "/api/config", {
         method: "POST",
@@ -259,6 +271,12 @@ try {
       resultHz: median(numbers("gpu", "resultHz")),
       resultAgeMs: median(numbers("gpu", "resultAgeMs")),
       rttMs: median(numbers("gpu", "rttMs")),
+      maxInFlight: Number(last.capture?.maxInFlight ?? 0),
+      medianInFlight: median(numbers("capture", "inFlight")),
+      // Correctness counters: a completion dropped because a newer frame had
+      // already committed, or because it exceeded the result-age ceiling.
+      supersededResults: Number(last.capture?.superseded ?? 0),
+      staleResults: Number(last.capture?.stale ?? 0),
       encodeMs: median(numbers("gpu", "encodeMs")),
       processingMs: median(numbers("gpu", "processingMs")),
       trackingMs: median(numbers("gpu", "trackingMs")),

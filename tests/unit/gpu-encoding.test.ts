@@ -101,6 +101,33 @@ async function ready() {
 }
 const binary = () =>
   Socket.instance.sent.filter((x) => x instanceof ArrayBuffer) as ArrayBuffer[];
+function completeFrame(frameId: string) {
+  const packet = binary()
+    .map((bytes) => decodeGpuFrame(new Uint8Array(bytes)).header)
+    .find((header) => header.frameId === frameId);
+  if (!packet) throw new Error(`no submitted frame ${frameId}`);
+  const {
+    v: _v,
+    type: _type,
+    format: _format,
+    imageLength: _length,
+    ...frame
+  } = packet;
+  Socket.instance.receive({
+    v: 1,
+    type: "inference.result",
+    ...frame,
+    ...descriptor,
+    detections: [],
+    metrics: {
+      decodeMs: 1,
+      preprocessMs: 1,
+      inferenceMs: 1,
+      postprocessMs: 1,
+      totalMs: 4,
+    },
+  });
+}
 function complete() {
   const { header } = decodeGpuFrame(new Uint8Array(binary().at(-1)!));
   const {
@@ -199,9 +226,41 @@ it("keeps one operation while encoding and does not allocate another canvas", as
   client.close();
   expect(await first).toBeInstanceOf(Error);
 });
+it("admits exactly maxInFlight frames and drops the frame beyond the bound", async () => {
+  const client = await ready();
+  expect(client.maxInFlight).toBe(GPU_LIMITS.maxInFlight);
+  const started: Promise<unknown>[] = [];
+  for (let i = 0; i < client.maxInFlight; i++) {
+    // Submissions are additionally spaced by the protocol send-rate floor.
+    await vi.advanceTimersByTimeAsync(1000 / GPU_LIMITS.maxHz + 6);
+    started.push(
+      client
+        .detect(source, { ...identity, frameSeq: i, frameId: `${epoch}:${i}` })
+        .catch((e) => e),
+    );
+    await vi.advanceTimersByTimeAsync(0);
+  }
+  expect(binary()).toHaveLength(client.maxInFlight);
+  expect(client.diagnostics.inFlight).toBe(client.maxInFlight);
+  // The frame past the bound is dropped, never queued.
+  await vi.advanceTimersByTimeAsync(1000 / GPU_LIMITS.maxHz + 6);
+  await expect(
+    client.detect(source, {
+      ...identity,
+      frameSeq: client.maxInFlight,
+      frameId: `${epoch}:${client.maxInFlight}`,
+    }),
+  ).rejects.toBeInstanceOf(GpuDroppedFrameError);
+  expect(binary()).toHaveLength(client.maxInFlight);
+  expect(client.diagnostics.inFlight).toBe(client.maxInFlight);
+  client.close();
+  for (const promise of started) expect(await promise).toBeInstanceOf(Error);
+  expect(client.diagnostics.inFlight).toBe(0);
+});
 it("backpressure rejects before send, releases encoding state, and permits later useful work", async () => {
   const client = await ready();
-  Socket.instance.bufferedAmount = GPU_LIMITS.messageBytes;
+  // The socket buffer may legitimately hold one packet per in-flight frame.
+  Socket.instance.bufferedAmount = GPU_LIMITS.messageBytes * client.maxInFlight;
   await expect(client.detect(source, identity)).rejects.toBeInstanceOf(
     GpuDroppedFrameError,
   );
@@ -310,4 +369,67 @@ it("reports actual recent submission/result rates and expires inactive samples",
   await vi.advanceTimersByTimeAsync(5001);
   expect(client.diagnostics.submittedHz).toBe(0);
   expect(client.diagnostics.resultHz).toBe(0);
+});
+it("falls back to one frame in flight against a relay that only admits one", async () => {
+  const client = await ready();
+  expect(client.maxInFlight).toBe(GPU_LIMITS.maxInFlight);
+  const refuseSecondFrame = async (seq: number) => {
+    // First frame is admitted and stays outstanding.
+    await vi.advanceTimersByTimeAsync(1000 / GPU_LIMITS.maxHz + 6);
+    const first = client
+      .detect(source, { ...identity, frameSeq: seq, frameId: `${epoch}:${seq}` })
+      .catch((e) => e);
+    await vi.advanceTimersByTimeAsync(0);
+    // Second frame is admitted locally, then refused by the older relay.
+    await vi.advanceTimersByTimeAsync(1000 / GPU_LIMITS.maxHz + 6);
+    const second = client
+      .detect(source, {
+        ...identity,
+        frameSeq: seq + 1,
+        frameId: `${epoch}:${seq + 1}`,
+      })
+      .catch((e) => e);
+    await vi.advanceTimersByTimeAsync(0);
+    Socket.instance.receive({
+      v: 1,
+      type: "inference.error",
+      roomId: uuid(1),
+      frameId: `${epoch}:${seq + 1}`,
+      code: "busy",
+    });
+    expect(await second).toBeInstanceOf(GpuDroppedFrameError);
+    // Resolve the frame the relay actually accepted, not the refused one.
+    completeFrame(`${epoch}:${seq}`);
+    await first;
+  };
+  // An isolated refusal is a race, not evidence: depth is retained.
+  await refuseSecondFrame(10);
+  expect(client.maxInFlight).toBe(GPU_LIMITS.maxInFlight);
+  await refuseSecondFrame(20);
+  expect(client.maxInFlight).toBe(GPU_LIMITS.maxInFlight);
+  // Systematic refusal is evidence: the client settles at one frame in flight.
+  await refuseSecondFrame(30);
+  expect(client.maxInFlight).toBe(1);
+  // The connection stays healthy and keeps analysing; it does not fall back to
+  // the browser detector, and the downgrade is permanent for this connection.
+  expect(client.ready).toBe(true);
+  await vi.advanceTimersByTimeAsync(1000 / GPU_LIMITS.maxHz + 6);
+  const next = client.detect(source, {
+    ...identity,
+    frameSeq: 40,
+    frameId: `${epoch}:40`,
+  });
+  await vi.advanceTimersByTimeAsync(0);
+  expect(client.diagnostics.inFlight).toBe(1);
+  await vi.advanceTimersByTimeAsync(1000 / GPU_LIMITS.maxHz + 6);
+  await expect(
+    client.detect(source, {
+      ...identity,
+      frameSeq: 41,
+      frameId: `${epoch}:41`,
+    }),
+  ).rejects.toBeInstanceOf(GpuDroppedFrameError);
+  completeFrame(`${epoch}:40`);
+  expect((await next).frameId).toBe(`${epoch}:40`);
+  expect(client.maxInFlight).toBe(1);
 });

@@ -1,5 +1,6 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { randomBytes, randomUUID } from "node:crypto";
+import { GPU_LIMITS } from "../../shared/src/limits.js";
 import { spawn, type ChildProcess } from "node:child_process";
 import { WebSocket, type RawData } from "ws";
 import { createRelay, type RelayConfig } from "../../backend/src/relay.js";
@@ -405,6 +406,38 @@ describe("Optional GPU relay: real transport with explicit synthetic inference r
     worker.send(next.result);
     await camera.message("inference.result");
     expect(f.relay.stats().gpu.pending).toBe(0);
+  });
+  it("admits exactly maxInFlight identities and completes them out of order", async () => {
+    const f = await fixture();
+    const { worker, room, camera } = await f.ready();
+    const first = frame(room.roomId);
+    camera.socket.send(first.bytes);
+    await until(() => worker.binaries.length === 1);
+    // Past the submission-rate floor the relay admits the second frame.
+    const second = frame(room.roomId, 2, first.header);
+    f.advance(100);
+    camera.socket.send(second.bytes);
+    await until(() => worker.binaries.length === 2);
+    expect(f.relay.stats().gpu.pending).toBe(GPU_LIMITS.maxInFlight);
+    // A third identity exceeds the bound and is refused rather than queued.
+    f.advance(100);
+    camera.socket.send(frame(room.roomId, 3, first.header).bytes);
+    expect((await camera.message("inference.error")).code).toBe("busy");
+    expect(worker.binaries).toHaveLength(2);
+    expect(f.relay.stats().gpu.pending).toBe(GPU_LIMITS.maxInFlight);
+    // Correlation is by exact identity, so a newer completion may land first.
+    worker.send(second.result);
+    expect((await camera.message("inference.result")).frameId).toBe(
+      second.header.frameId,
+    );
+    expect(f.relay.stats().gpu.pending).toBe(1);
+    worker.send(first.result);
+    expect((await camera.message("inference.result")).frameId).toBe(
+      first.header.frameId,
+    );
+    expect(f.relay.stats().gpu.pending).toBe(0);
+    room.owner!.send({ v: 2, type: "ping" });
+    await room.owner!.message("pong");
   });
   it("closes a valid binary flood on message 21 before decoding it", async () => {
     const f = await fixture();

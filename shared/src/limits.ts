@@ -40,7 +40,20 @@ export const GPU_LIMITS = Object.freeze({
   defaultEdge: 640,
   maxHz: 15,
   targetHz: 10,
-  inFlight: 1,
+  /**
+   * Bounded analysis pipeline depth. The camera, the relay lease and the worker
+   * each enforce this same ceiling, so no stage can build a queue: the worker
+   * runs one CUDA call with at most one newest frame waiting behind it.
+   */
+  maxInFlight: 2,
+  /**
+   * Hard freshness ceiling for a completed analysis result, measured from
+   * capture to arrival back at the camera. Beyond this the result is discarded
+   * entirely: not displayed, not tracked, never a speed or candidate input.
+   * Set at the overlay staleness ceiling, because a result older than that can
+   * never be presented as live anyway. See docs/LATENCY_POLICY.md.
+   */
+  maxResultAgeMs: 700,
   frameTimeoutMs: 2000,
   helloMs: 5000,
   heartbeatMs: 15000,

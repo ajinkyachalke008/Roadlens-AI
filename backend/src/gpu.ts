@@ -51,6 +51,13 @@ type Pending = {
   camera: WebSocket | null;
   deadline: number;
 };
+/**
+ * Bounded analysis depth. The camera client and the worker enforce the same
+ * ceiling, so no stage queues frames: the worker runs one CUDA call with at
+ * most one newest frame behind it. Identities are correlated exactly, never by
+ * arrival order, so an out-of-order completion cannot be attributed elsewhere.
+ */
+const maxInFlight = GPU_LIMITS.maxInFlight;
 const hash = (value: string) => createHash("sha256").update(value).digest();
 const identity = (frame: GpuIdentity): GpuIdentity => ({
   roomId: frame.roomId,
@@ -83,7 +90,8 @@ export function createGpuRelay(options: GpuRelayOptions) {
   const peers = new Map<WebSocket, Peer>();
   let worker: Worker | null = null;
   let lease: Lease | null = null;
-  let pending: Pending | null = null;
+  /** Submitted, uncompleted identities by frameId. At most `maxInFlight`. */
+  const pending = new Map<string, Pending>();
   let pendingTimer: ReturnType<typeof setTimeout> | null = null;
   let closed = false;
   function disconnect(socket: WebSocket, code = 1008) {
@@ -92,9 +100,14 @@ export function createGpuRelay(options: GpuRelayOptions) {
     timer.unref();
   }
   function clearPending() {
-    pending = null;
+    pending.clear();
     if (pendingTimer) clearTimeout(pendingTimer);
     pendingTimer = null;
+  }
+  /** Oldest deadline first; the map preserves submission order. */
+  function nextDeadline() {
+    for (const entry of pending.values()) return entry.deadline;
+    return null;
   }
   function sendCamera(current: Lease, value: unknown) {
     return options.sendRoom(
@@ -107,7 +120,8 @@ export function createGpuRelay(options: GpuRelayOptions) {
     const current = lease;
     if (!current || current.roomId !== roomId) return;
     lease = null;
-    if (pending?.camera === current.socket) pending.camera = null;
+    for (const entry of pending.values())
+      if (entry.camera === current.socket) entry.camera = null;
     if (notifyWorker && worker && options.roomExists(roomId))
       options.sendRoom(
         roomId,
@@ -138,7 +152,7 @@ export function createGpuRelay(options: GpuRelayOptions) {
   function state(): "offline" | "busy" | "ready" {
     if (!worker?.descriptor || worker.socket.readyState !== WebSocket.OPEN)
       return "offline";
-    return lease || pending ? "busy" : "ready";
+    return lease || pending.size ? "busy" : "ready";
   }
   function maintain() {
     const time = options.now();
@@ -153,15 +167,21 @@ export function createGpuRelay(options: GpuRelayOptions) {
       }
     }
     if (lease && !options.roomExists(lease.roomId)) release(lease.roomId);
-    if (pending && time >= pending.deadline) {
-      if (lease && pending.camera === lease.socket)
-        sendCamera(lease, {
-          v: 1,
-          type: "inference.error",
-          roomId: pending.identity.roomId,
-          frameId: pending.identity.frameId,
-          code: "timeout",
-        });
+    // A single expiry condemns the worker: a native call that overran its
+    // deadline cannot be cancelled, so every outstanding identity is abandoned.
+    const expired = [...pending.values()].filter(
+      (entry) => time >= entry.deadline,
+    );
+    if (expired.length) {
+      for (const entry of expired)
+        if (lease && entry.camera === lease.socket)
+          sendCamera(lease, {
+            v: 1,
+            type: "inference.error",
+            roomId: entry.identity.roomId,
+            frameId: entry.identity.frameId,
+            code: "timeout",
+          });
       const currentWorker = worker?.socket;
       if (currentWorker) {
         loseWorker(currentWorker);
@@ -274,8 +294,12 @@ export function createGpuRelay(options: GpuRelayOptions) {
               previous.sourceHeight !== frame.sourceHeight)
           )
             throw new Error("geometry");
+          // Depth, rate and strict per-epoch monotonicity. Admitting only
+          // strictly newer identities is what lets the camera treat an
+          // out-of-order completion as superseded rather than as truth.
           if (
-            pending ||
+            pending.size >= maxInFlight ||
+            pending.has(frame.frameId) ||
             options.now() - lease.lastSubmittedAt < 1000 / GPU_LIMITS.maxHz ||
             (previous?.captureEpoch === frame.captureEpoch &&
               (frame.frameSeq <= previous.frameSeq ||
@@ -307,11 +331,12 @@ export function createGpuRelay(options: GpuRelayOptions) {
           }
           lease.lastSubmittedAt = options.now();
           lease.lastIdentity = identity(frame);
-          pending = {
+          pending.set(frame.frameId, {
             identity: identity(frame),
             camera: socket,
             deadline: options.now() + GPU_LIMITS.frameTimeoutMs,
-          };
+          });
+          if (pendingTimer) clearTimeout(pendingTimer);
           pendingTimer = setTimeout(maintain, GPU_LIMITS.frameTimeoutMs);
           pendingTimer.unref();
           return;
@@ -340,7 +365,7 @@ export function createGpuRelay(options: GpuRelayOptions) {
         if (worker?.socket !== socket) throw new Error("worker");
         const message = WorkerMessageSchema.parse(value);
         if (message.type === "worker.ready") {
-          if (lease || pending) throw new Error("model busy");
+          if (lease || pending.size) throw new Error("model busy");
           const { modelId, modelSha256, runtime, inputSize } = message;
           worker.descriptor = { modelId, modelSha256, runtime, inputSize };
           return;
@@ -356,23 +381,32 @@ export function createGpuRelay(options: GpuRelayOptions) {
           message.type !== "inference.error"
         )
           throw new Error("role");
-        if (!pending || !worker.descriptor) throw new Error("correlation");
+        const outstanding = pending.get(message.frameId);
+        if (!outstanding || !worker.descriptor)
+          throw new Error("correlation");
         if (message.type === "inference.result") {
           if (
-            !sameGpuFrame(pending.identity, message) ||
+            !sameGpuFrame(outstanding.identity, message) ||
             (Object.keys(worker.descriptor) as (keyof GpuDescriptor)[]).some(
               (key) => message[key] !== worker!.descriptor![key],
             )
           )
             throw new Error("result mismatch");
-        } else if (
-          message.roomId !== pending.identity.roomId ||
-          message.frameId !== pending.identity.frameId
-        )
+        } else if (message.roomId !== outstanding.identity.roomId)
           throw new Error("error mismatch");
-        if (lease && pending.camera === lease.socket)
+        if (lease && outstanding.camera === lease.socket)
           sendCamera(lease, message);
-        clearPending();
+        pending.delete(message.frameId);
+        if (pendingTimer) clearTimeout(pendingTimer);
+        pendingTimer = null;
+        const deadline = nextDeadline();
+        if (deadline !== null) {
+          pendingTimer = setTimeout(
+            maintain,
+            Math.max(0, deadline - options.now()),
+          );
+          pendingTimer.unref();
+        }
       } catch {
         loseWorker(socket);
         if (lease?.socket === socket) release(lease.roomId);
@@ -392,8 +426,9 @@ export function createGpuRelay(options: GpuRelayOptions) {
     stats: () => ({
       sockets: peers.size,
       leased: !!lease,
-      pending: pending ? 1 : 0,
-      retired: pending && !pending.camera ? 1 : 0,
+      pending: pending.size,
+      retired: [...pending.values()].filter((entry) => !entry.camera).length,
+      maxInFlight,
     }),
     maintain,
     endRoom: (roomId: string) => release(roomId),

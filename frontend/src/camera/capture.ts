@@ -10,7 +10,7 @@ import {
   type FrameResult,
   type CameraPolicy,
 } from "../../../shared/src/schemas";
-import { LIMITS } from "../../../shared/src/limits";
+import { GPU_LIMITS, LIMITS } from "../../../shared/src/limits";
 import { AdaptivePerformance } from "./performance";
 import {
   FrameClock,
@@ -42,6 +42,11 @@ export interface CompletedFrame {
     episodeKey: string;
     estimate: SpeedEstimate;
   }[];
+  /**
+   * Every track's speed estimate this frame, valid or not. Speed validation
+   * needs the estimate for a chosen vehicle, not only for rule-triggered ones.
+   */
+  estimates: Map<number, SpeedEstimate>;
 }
 /** Shown when a visible source stops producing completed analysis. */
 export const STALLED_STATUS = "Camera analysis stalled · retrying";
@@ -94,7 +99,6 @@ export class CameraCapture {
   onInferenceMode = (_mode: string) => {};
   remote: RemoteDetector | null = null;
   private switching = false;
-  private activeJob: symbol | null = null;
   private browserProfile: 416 | 320 = 416;
   private sourceFrames = 0;
   private skippedFrames = 0;
@@ -127,6 +131,12 @@ export class CameraCapture {
     sourceTimeMs: number;
     frameSeq: number;
     trackingMs: number;
+    inFlight: number;
+    maxInFlight: number;
+    /** Completions dropped because a newer frame had already committed. */
+    supersededResults: number;
+    /** Completions dropped for exceeding the result-age ceiling. */
+    staleResults: number;
   } {
     return {
       sourceMode: this.sourceMode,
@@ -135,6 +145,10 @@ export class CameraCapture {
       acceptedFrames: this.acceptedFrames,
       duplicateFrames: this.duplicateFrames,
       skippedFrames: this.skippedFrames,
+      inFlight: this.inFlightJobs.size,
+      maxInFlight: this.maxInFlight,
+      supersededResults: this.supersededResults,
+      staleResults: this.staleResults,
       sourceHz: this.hz(this.sourceTimes),
       acceptedHz: this.hz(this.acceptedTimes),
       analysisHz: this.hz(this.completionTimes),
@@ -236,7 +250,27 @@ export class CameraCapture {
   private rules = new CandidateRules();
   private stream: MediaStream | null = null;
   private running = false;
-  private busy = false;
+  /**
+   * Frames whose analysis has started and not finished. Bounded by maxInFlight;
+   * frames arriving at capacity are dropped, never queued, so the newest useful
+   * frame is always the one submitted.
+   */
+  private inFlightJobs = new Set<symbol>();
+  /**
+   * Highest frameSeq already committed to the tracker in the current epoch.
+   * With several frames in flight a completion can arrive after a newer one;
+   * such a result is superseded and must never reach tracking, speed or rules.
+   */
+  private lastCommittedSeq = -1;
+  private supersededResults = 0;
+  private staleResults = 0;
+  /** Browser inference is one ONNX worker thread: queuing only adds latency. */
+  get maxInFlight() {
+    return this.remote?.maxInFlight ?? 1;
+  }
+  private get atCapacity() {
+    return this.inFlightJobs.size >= this.maxInFlight;
+  }
   private generation = 0;
   private frameSeq = 0;
   private frameClock = new FrameClock();
@@ -272,6 +306,7 @@ export class CameraCapture {
     this.rules.reset();
     this.guard.reset();
     this.completionTimes = [];
+    this.lastCommittedSeq = -1;
     this.latest = null;
     this.onReset();
   }
@@ -438,7 +473,7 @@ export class CameraCapture {
       return;
     }
     if (
-      !this.busy &&
+      !this.inFlightJobs.size &&
       !this.sourceStalled &&
       now - this.lastCompletedAt > ANALYSIS_STALL_MS
     ) {
@@ -542,10 +577,10 @@ export class CameraCapture {
     this.sourceTimes = this.sourceTimes
       .filter((t) => received - t <= 5000)
       .slice(-600);
-    if (this.busy || this.switching) this.skippedFrames++;
+    if (this.atCapacity || this.switching) this.skippedFrames++;
     if (
       !this.running ||
-      this.busy ||
+      this.atCapacity ||
       this.switching ||
       (!this.detector && !this.remote?.ready) ||
       !this.video.videoWidth
@@ -577,9 +612,8 @@ export class CameraCapture {
     if (performance.now() - this.lastStartedAt < this.targetIntervalMs())
       return;
     this.lastStartedAt = performance.now();
-    this.busy = true;
     const job = Symbol();
-    this.activeJob = job;
+    this.inFlightJobs.add(job);
     const generation = this.generation;
     const epoch = this.captureEpoch;
     const started = performance.now();
@@ -587,7 +621,7 @@ export class CameraCapture {
     canvas.width = this.video.videoWidth;
     canvas.height = this.video.videoHeight;
     if (canvas.width * canvas.height > 16_777_216) {
-      this.busy = false;
+      this.inFlightJobs.delete(job);
       this.pause();
       this.onError(
         "Source resolution is too large. Choose a video at 4K or below.",
@@ -628,6 +662,24 @@ export class CameraCapture {
       )
         return;
       const now = performance.now();
+      // Ordering gate. Several frames may be in flight, so a completion can
+      // arrive after a newer one has already advanced the tracker. Committing
+      // it would rewind track history and corrupt every source-time derived
+      // quantity, so a superseded result is counted and discarded here —
+      // before tracking, speed, rules, counts, evidence or display.
+      if (frameSeq <= this.lastCommittedSeq) {
+        this.supersededResults++;
+        return;
+      }
+      // Freshness gate. A result older than the ceiling can never be presented
+      // as live, so it is discarded rather than used as a measurement input.
+      // Its source time would still be geometrically valid; the ceiling is a
+      // deliberate safety bound, documented in docs/LATENCY_POLICY.md.
+      if (now - started > GPU_LIMITS.maxResultAgeMs) {
+        this.staleResults++;
+        return;
+      }
+      this.lastCommittedSeq = frameSeq;
       this.completionTimes.push(now);
       this.completionTimes = this.completionTimes.filter(
         (t) => now - t <= 5000,
@@ -660,6 +712,7 @@ export class CameraCapture {
       this.trackingMs = performance.now() - trackingStarted;
       const counts = emptyCounts();
       const candidates: CompletedFrame["candidates"] = [];
+      const estimates = new Map<number, SpeedEstimate>();
       const tracks = tracked.map((track) => {
         if (track.observed) counts[track.className]++;
         const speed = estimateSpeed(track, {
@@ -670,6 +723,7 @@ export class CameraCapture {
           mounted: this.mounted,
           background: this.background,
         });
+        estimates.set(track.trackId, speed);
         const rule = this.rules.update(
           track.trackId,
           epoch,
@@ -732,6 +786,13 @@ export class CameraCapture {
       });
       const jpeg = await sampledJpeg(canvas);
       if (generation !== this.generation || epoch !== this.captureEpoch) return;
+      // The tracker already consumed this frame in order. Publishing is a
+      // separate decision: a newer frame may have committed during the encode,
+      // and the display must never step backwards.
+      if (frameSeq < this.lastCommittedSeq) {
+        this.supersededResults++;
+        return;
+      }
       const frame: CompletedFrame = {
         result,
         policy,
@@ -741,6 +802,7 @@ export class CameraCapture {
         jpegHeight: jpeg.height,
         processingMs: performance.now() - started,
         candidates,
+        estimates,
       };
       this.latest = frame;
       this.lastCompletedAt = performance.now();
@@ -772,10 +834,7 @@ export class CameraCapture {
         );
       }
     } finally {
-      if (this.activeJob === job) {
-        this.busy = false;
-        this.activeJob = null;
-      }
+      this.inFlightJobs.delete(job);
       if (this.latest?.canvas !== canvas) {
         canvas.width = 1;
         canvas.height = 1;
@@ -786,8 +845,8 @@ export class CameraCapture {
     this.running = false;
     this.generation++;
     this.switching = false;
-    this.busy = false;
-    this.activeJob = null;
+    this.inFlightJobs.clear();
+    this.lastCommittedSeq = -1;
     this.remote?.close();
     this.remote = null;
     this.cancelScheduled();

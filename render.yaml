@@ -5,7 +5,7 @@ services:
     plan: free
     region: oregon
     numInstances: 1
-    buildCommand: npm ci && npm run build:relay
+    buildCommand: npm ci --include=dev && npm run build:relay
     startCommand: npm run start
     healthCheckPath: /healthz
     autoDeployTrigger: off

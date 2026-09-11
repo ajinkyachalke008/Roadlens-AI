@@ -192,6 +192,32 @@ runs in a gap where no analysis frame is waiting.
 | Worker (pytest) | 40 + 68 subtests | 90 + 135 subtests |
 | E2E / privacy / model | 12 / 10 / 11 | unchanged, all passing |
 
+## Live deployment verification
+
+Run against the deployed services on 2026-09-11, with the Render relay still on
+the commit *before* this work.
+
+| check | result |
+| --- | --- |
+| Worker loads the plate pipeline | PASS — `Plate recognition ready.` |
+| Worker connects to a relay **without** plate support | PASS — `GPU WORKER READY`, relay reported `state: ready` |
+| Worker advertises plate to that relay | Correctly **not** advertised |
+| Frontend deployed and serving | PASS — Vercel, favicon 404 → 200 |
+| Cloud smoke (paired browsers, real model) | PASS |
+
+The second row is the one that matters. `worker.ready` is a strict schema, so a
+worker announcing a `plate` descriptor to that relay would have been rejected and
+dropped on every reconnect, costing the operator GPU analysis entirely. Probing
+the deployed relay's schema directly confirms it: a silent worker is accepted, an
+advertising one is refused. The `plateProtocol` negotiation added in `4dedccf` is
+what makes the observed clean connection possible.
+
+**Plate recognition is therefore implemented and verified, but not yet live in
+production.** `render.yaml` sets `autoDeployTrigger: off`, so pushing to `main`
+does not deploy the relay; until it is deployed from the Render dashboard the
+worker stays silent about plates and reports read "Plate unavailable". Nothing
+else is affected.
+
 ## Physical RoadLens validation
 
 **NOT VERIFIED.** No measurement in this file involved a phone camera pointed at

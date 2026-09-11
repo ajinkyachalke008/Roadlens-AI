@@ -4,7 +4,7 @@ The September 10, 2026 release-hardening request explicitly authorizes preparing
 
 Original instruction packs, research, private environments, datasets and generated test captures are preserved locally and excluded from the public application repository. No enterprise license was purchased. This decision does not relicense those excluded materials.
 
-GitHub authentication is available for the intended owner; the requested repository name is roadlens-ai. Actual publication and commit results are recorded in FINAL_HANDOFF.md after verification.
+GitHub authentication is available for the intended owner; the requested repository name is roadlens-ai. Application source was published at https://github.com/kokoc30/roadlens-ai and verified, release commit c1f32553509918fae55a9eea86a78f06f8ab9099. See FINAL_HANDOFF.md for deployment results.
 
 Render creation is explicitly blocked by the user's no-overage requirement: read-only inspection of the authorized account shows billable usage beyond included allowances. No billing or unrelated service settings were changed. A suitable authorized workspace with verified no-overage behavior is required before creating the relay. Application byte caps do not guarantee provider billing limits.
 

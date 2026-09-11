@@ -41,3 +41,15 @@ Full cloud smoke, deployed relay restart and physical-phone/cellular/second-netw
 - npm run test:production:1/1 real paired browser flow PASS,11.8seconds, plus compiled health/assets/hash/MIME/404 checks.
 - npm run test:split-production:1/1 real paired browser flow PASS plus distinct HTTPS frontend/relay, WSS, exact-origin CORS and rejected unrelated/local aliases. Ephemeral test TLS certificates do not establish public hosting.
 - Latest360/390/430/1440px layout assertions passed; updated390px/desktop screenshots visually inspected. Code-free local screenshots are excluded from the source release.
+
+## Publication and actual cloud frontend
+
+Public GitHub repository: https://github.com/kokoc30/roadlens-ai; main application release commit c1f32553509918fae55a9eea86a78f06f8ab9099.116 application/source/license/test/config files were committed, excluding original instruction/research packs, private environments, generated captures and credentials. Gitleaks8.30.1 scanned the committed history with no leaks. Git was clean and origin/main matched after push.
+
+Vercel project roadlens-ai, Hobby, production https://roadlens-ai-five.vercel.app. Dashboard deployment HmxqfkocPzEczU2icz8aRgq9CydW was Ready/Production,18seconds, matching release commit; resource inventory showed19 static assets and no functions. Only the explicit public build setting VITE_SHARING_DISABLED=true was supplied; unused backend environment suggestions were removed. No paid plan, analytics or extra service was enabled.
+
+ROADLENS_BASE_URL=https://roadlens-ai-five.vercel.app npm run smoke:frontend PASSED1/1 in9.2seconds. Both416 and320 actually ran in the deployed browser worker, producing reports with distinct source epochs and corresponding profiles. HTTPS/model/runtime source-pinned manifests/MIME/bytes/SHA256 and missing-asset404s passed. Local report JSON/CSV and End cleanup passed; sharing disabled, no relay requests, no viewer camera/model, no console/page errors. Local development/relay ports were stopped. This is frontend cloud evidence, not full paired cloud smoke.
+
+Final local split HTTPS/WSS smoke passed1/1 in18.2seconds after removing duplicate harness socket-close listeners on HTTP keepalive reuse. No warning was silenced and no product limit changed.
+
+Render service creation was not attempted because the authorized account permits billable overages. Full cloud smoke, deployed relay restart, physical-phone/cellular/second-network verification and field-speed accuracy remain NOT RUN/UNMEASURED.

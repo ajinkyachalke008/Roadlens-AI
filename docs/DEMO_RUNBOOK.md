@@ -1,6 +1,6 @@
 # RoadLens demo runbook
 
-See FINAL_HANDOFF.md for verified URLs and release status. Full two-device cloud operation requires an authorized deployed relay; a frontend-only release explicitly disables sharing.
+Verified public frontend: https://roadlens-ai-five.vercel.app. See FINAL_HANDOFF.md for release status. Full two-device cloud operation requires an authorized deployed relay; a frontend-only release explicitly disables sharing.
 
 ## Local paired demonstration
 

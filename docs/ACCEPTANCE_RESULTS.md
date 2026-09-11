@@ -18,7 +18,7 @@ This records the implementation run against the supplied acceptance matrix. PASS
 | T29 | PASS actual local process restart: old room/code/token invalid. Camera-local reports are retained by design on lost sharing; deployed-provider restart and restoration still NOT_RUN. |
 | T30 | PASS: owner grace, reconnect and paused/stale clearing in integration/UI tests. |
 | T31 | Desktop and phone-width Chromium layout checks and code-free screenshots in `docs/evidence`; native dialogs use browser focus containment/restoration. Physical touch/accessibility audit NOT_RUN. |
-| T32 | Deployment configs validated; compiled local production and worker smoke are separate from cloud. Local production split HTTPS/WSS also passes. Public paired hosting remains BLOCKED by Render authorization. |
+| T32 | Deployment configs validated; compiled local production and worker smoke are separate from cloud. Local production split HTTPS/WSS also passes. Public paired hosting remains BLOCKED by Render authorization. Frontend-only https://roadlens-ai-five.vercel.app is deployed and passes real dual-profile/local-report smoke. |
 | T33 | PARTIAL: accessible account plans/usage recorded read-only; fanout budget exhaustion passes. Account-level free-only/no-overage assurance remains unresolved. |
 | T34–T35 | NOT_RUN: no physical phone/cellular/second-network trial or sustained phone benchmark. |
 | T36 | UNMEASURED: no field ground-truth speed dataset. |

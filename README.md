@@ -1,5 +1,9 @@
 # RoadLens
 
+[Open the deployed camera app](https://roadlens-ai-five.vercel.app) · [Source](https://github.com/kokoc30/roadlens-ai)
+
+The public frontend currently supports camera/replay analysis and local reports. Remote sharing is disabled until a Render workspace meets the required no-overage condition.
+
 Temporary traffic monitoring from a camera browser. React + TypeScript + Vite runs genuine YOLO26n detection through an ONNX Runtime Web worker. A small Node + Express + ws process pairs devices and relays sampled analyzed images. The phone performs inference, tracking, geometry and rules; the relay is neither an AI server nor a database.
 
 Video comes first, metrics and temporary reports below. Start a rear camera or select a permitted replay. Connect another browser using a random expiring code. Replay remains labeled and runs actual inference. The viewer does not load a detector or request a camera.

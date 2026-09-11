@@ -878,6 +878,32 @@ test("@frontend privacy: real local replay inference, observation and explicit d
     const csvEvent = camera.page.waitForEvent("download");
     await camera.page.getByRole("button", { name: "CSV", exact: true }).click();
     expect(await downloadText(await csvEvent)).toContain('"replay_video"');
+    expect(exported.reports[0].detectorProfile).toBe("416");
+    await camera.page
+      .getByRole("button", { name: "Pause camera", exact: true })
+      .click();
+    await camera.page
+      .getByRole("button", { name: "Settings", exact: true })
+      .click();
+    await camera.page.getByLabel("Detector profile").selectOption("320");
+    await camera.page
+      .getByRole("button", { name: "Close drawer", exact: true })
+      .click();
+    await camera.page
+      .getByRole("button", { name: "Resume camera", exact: true })
+      .click();
+    await expect(camera.page.getByTestId("analyzed-frame")).toBeVisible();
+    await camera.page
+      .getByRole("button", { name: "Save observation", exact: true })
+      .click();
+    const smaller = await exportReports(camera.page);
+    expect(smaller.reports).toHaveLength(2);
+    expect(
+      smaller.reports.map((report) => report.detectorProfile).sort(),
+    ).toEqual(["320", "416"]);
+    expect(
+      new Set(smaller.reports.map((report) => report.captureEpoch)).size,
+    ).toBe(2);
     await viewer.page.goto("/viewer");
     if (process.env.ROADLENS_FRONTEND_ONLY === "true") {
       await expect(

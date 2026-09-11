@@ -1,6 +1,6 @@
 # Deployment
 
-The application is prepared for Vercel static hosting and one Render Free relay process. See FINAL_HANDOFF.md for actual URLs and completed checks. Configuration readiness does not establish a cloud deployment.
+Vercel production frontend: https://roadlens-ai-five.vercel.app (project roadlens-ai, Hobby). Public application source: https://github.com/kokoc30/roadlens-ai. The static deployment passed asset and dual-profile browser smoke. One Render Free relay process is prepared but not deployed. See FINAL_HANDOFF.md for actual URLs and completed checks. Configuration readiness does not establish a cloud deployment.
 
 ## Current authorization boundary
 

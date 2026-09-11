@@ -6,13 +6,13 @@ Core implementation is present and locally verified: browser YOLO inference, cam
 
 ## Git
 
-Branch main; application-only AGPL-3.0 release authorized. Original instructions/research/private environments and generated captures remain excluded and preserved locally. Publication/commit results will be recorded after final verification. No existing Git history was rewritten. Gitleaks8.30.1 found no secrets in the release preparation scan.
+Branch main; application-only AGPL-3.0 release authorized. Original instructions/research/private environments and generated captures remain excluded and preserved locally. Public repository: https://github.com/kokoc30/roadlens-ai. Application release commit: c1f32553509918fae55a9eea86a78f06f8ab9099. Subsequent documentation and smoke-test changes are visible through git log; the application source is unchanged. No existing Git history was rewritten. Gitleaks8.30.1 found no secrets in the release preparation scan.
 
 ## Deployment
 
-Vercel static configuration is ready for a frontend-only release while the relay is blocked. That build explicitly sets VITE_SHARING_DISABLED=true; camera/replay analysis and local reports remain available, Share/Connect do not claim availability.
+Frontend production URL: https://roadlens-ai-five.vercel.app. Vercel project roadlens-ai is deployed on Hobby. The dashboard verified Ready/Production, source c1f32553509918fae55a9eea86a78f06f8ab9099,18second build, and19 static assets with no functions. This is a frontend-only release while the relay is blocked. That build explicitly sets VITE_SHARING_DISABLED=true; camera/replay analysis and local reports remain available, Share/Connect do not claim availability.
 
-Render Free relay creation is BLOCKED by the user's strict no-overage condition: the authorized account explicitly bills usage beyond its included allowances. No cloud relay exists and no billing settings were changed. Full cloud smoke/deployed restart remain NOT RUN. Exact public frontend/GitHub URLs are recorded only after actual creation and checks.
+Render Free relay creation is BLOCKED by the user's strict no-overage condition: the authorized account explicitly bills usage beyond its included allowances. No cloud relay exists and no billing settings were changed. Full cloud smoke/deployed restart remain NOT RUN. Public frontend smoke PASSED1/1 in9.2seconds: actual416 and320 browser inference, profile-reset provenance, local observation/JSON/CSV, cleanup, no API requests, no viewer model/camera and no browser console/page errors. HTTPS, model/runtime MIME and source-pinned bytes/hashes, and missing-asset404s passed. Local development/relay ports were not listening. Full cloud smoke remains NOT RUN.
 
 ## Tests
 
@@ -65,4 +65,4 @@ NOT VERIFIED. No physical rear-camera/cellular/second-network, sustained thermal
 
 Local paired demo: npm ci; npm run model:prepare; npm run dev. Open http://127.0.0.1:5173 in two desktop browsers. Use a camera or permitted Settings → Use replay video; Share/connect by code, save/review/export, Stop sharing/re-pair, End and verify cleanup.
 
-Public camera-only demo uses only a verified frontend URL, with sharing explicitly unavailable. For full cloud: provide an authorized Render workspace with verified no-overage behavior; deploy render.yaml free relay; configure exact frontend ALLOWED_ORIGINS and Vercel HTTPS VITE_API_BASE_URL plus VITE_SHARING_DISABLED=false; rebuild; run smoke:cloud with actual origins; verify real relay restart; stop local services; execute the physical phone checklist. Then perform safe independent field-speed evaluation if needed.
+Public camera-only demo: open https://roadlens-ai-five.vercel.app, choose Start camera or Settings → Use replay video, save observations and explicitly download reports. Sharing is unavailable. For full cloud: provide an authorized Render workspace with verified no-overage behavior; deploy render.yaml free relay; configure exact frontend ALLOWED_ORIGINS and Vercel HTTPS VITE_API_BASE_URL plus VITE_SHARING_DISABLED=false; rebuild; run smoke:cloud with actual origins; verify real relay restart; stop local services; execute the physical phone checklist. Then perform safe independent field-speed evaluation if needed.

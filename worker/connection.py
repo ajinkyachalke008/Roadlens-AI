@@ -18,7 +18,8 @@ from . import protocol
 
 class WorkerConnection:
     def __init__(self, config, detector, *, connector=None, emit=print,
-                 heartbeat_seconds=15, stale_seconds=45, register_seconds=5, executor=None):
+                 heartbeat_seconds=15, stale_seconds=45, register_seconds=5, executor=None,
+                 plate_reader=None):
         self.config = config
         self.detector = detector
         self.connector = connector
@@ -30,6 +31,11 @@ class WorkerConnection:
         self.active = None
         # At most one (header, image) waiting behind the active native call.
         self.queued = None
+        # Plate recognition is optional and strictly lower priority. At most one
+        # plate task exists, and it is only ever admitted while no traffic frame
+        # is running or waiting, so analysis never queues behind a plate read.
+        self.plate_reader = plate_reader
+        self.plate_active = None
         self.socket = None
         self.generation = 0
         self.last_pong = 0.0
@@ -74,6 +80,38 @@ class WorkerConnection:
             except Exception:
                 await socket.close(code=1011, reason="worker_send_failed")
 
+    async def _process_plate(self, socket, generation, header, image):
+        """Read one vehicle crop, then forget it.
+
+        The reply is a single-frame observation. No crop, reading or track is
+        retained here: agreeing across frames is the camera's job, because the
+        camera is the only party that already holds track state and clears it
+        when its session ends.
+        """
+        try:
+            output = await asyncio.get_running_loop().run_in_executor(
+                self.executor, self.plate_reader.read_jpeg, image,
+                header["encodedWidth"], header["encodedHeight"])
+        except ValueError:
+            message = protocol.plate_error(header, "decode_failed")
+        except Exception:
+            message = protocol.plate_error(header, "plate_failed")
+        else:
+            try:
+                message = protocol.plate_result(header, output, self.plate_reader.descriptor())
+            except Exception:
+                message = protocol.plate_error(header, "plate_failed")
+        finally:
+            image = None
+        if self.generation == generation and self.socket is socket and not self.stop.is_set():
+            try:
+                await self._send(socket, message)
+            except Exception:
+                await socket.close(code=1011, reason="worker_send_failed")
+
+    def _traffic_busy(self):
+        return (self.active is not None and not self.active.done()) or self.queued is not None
+
     @staticmethod
     def _error(header, code):
         return {"v": 1, "type": "inference.error", "roomId": header["roomId"], "frameId": header["frameId"], "code": code}
@@ -84,6 +122,9 @@ class WorkerConnection:
             # kernel. Never cancel this task or start another native call behind it.
             await asyncio.shield(self.active)
             self.active = None
+        if self.plate_active is not None:
+            await asyncio.shield(self.plate_active)
+            self.plate_active = None
 
     def close_executor(self):
         if self.owns_executor:
@@ -116,12 +157,32 @@ class WorkerConnection:
             protocol.require(registered["type"] == "worker.registered")
             health = await asyncio.get_running_loop().run_in_executor(self.executor, self.detector.health)
             protocol.require(health.get("ready") is True)
-            await self._send(socket, {"v": 1, "type": "worker.ready", **protocol.descriptor(health)})
+            ready = {"v": 1, "type": "worker.ready", **protocol.descriptor(health)}
+            if self.plate_reader is not None:
+                # Advertised only when a plate detector and an OCR engine both
+                # loaded. Omitting it is the supported case, not a failure.
+                ready["plate"] = self.plate_reader.descriptor()
+            await self._send(socket, ready)
             self.ready = True
             self.last_pong = time.monotonic()
             self.emit("GPU WORKER READY — authenticated outbound relay connected.")
             heartbeat = asyncio.create_task(self._heartbeat(socket))
             async for raw in socket:
+                if type(raw) is bytes and protocol.is_plate_frame(raw):
+                    header, image = protocol.plate_frame(raw)
+                    raw = None
+                    # Traffic detection always wins. A plate request that arrives
+                    # while analysis is running or waiting is refused outright
+                    # rather than queued, so plate work can never accumulate in
+                    # front of the next frame.
+                    if self.plate_reader is None:
+                        await self._send(socket, protocol.plate_error(header, "unavailable"))
+                    elif self._traffic_busy() or (self.plate_active is not None and not self.plate_active.done()):
+                        await self._send(socket, protocol.plate_error(header, "busy"))
+                    else:
+                        self.plate_active = asyncio.create_task(self._process_plate(socket, generation, header, image))
+                    del image, header
+                    continue
                 if type(raw) is bytes:
                     header, image = protocol.frame(raw)
                     raw = None
@@ -155,6 +216,10 @@ class WorkerConnection:
             self.generation += 1
             self.socket = None
             self.queued = None
+            # `plate_active` is deliberately left in place: like an analysis
+            # call, a running plate read cannot be cancelled, so `drain()` must
+            # still be able to wait for it before the next registration reuses
+            # the single executor thread.
             if heartbeat:
                 heartbeat.cancel()
                 with suppress(asyncio.CancelledError):

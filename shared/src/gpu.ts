@@ -1,6 +1,11 @@
 import { z } from "zod";
 import { GPU_LIMITS } from "./limits.js";
 import { DetectionSchema } from "./schemas.js";
+import {
+  PlateDescriptorSchema,
+  PlateErrorSchema,
+  PlateResultSchema,
+} from "./plates.js";
 
 const id = z.string().uuid();
 const seq = z.number().int().nonnegative().max(Number.MAX_SAFE_INTEGER);
@@ -37,6 +42,12 @@ export const WorkerRegisterSchema = z
 export const WorkerReadySchema = GpuDescriptorSchema.extend({
   ...base,
   type: z.literal("worker.ready"),
+  /**
+   * Present only when this worker actually loaded a plate detector and an OCR
+   * engine. Its absence is the supported case, not a failure: the traffic
+   * pipeline is complete without it.
+   */
+  plate: PlateDescriptorSchema.optional(),
 });
 export const GpuIdentitySchema = z
   .object({
@@ -100,6 +111,8 @@ export const GpuStatusSchema = z
     type: z.literal("gpu.status"),
     state: z.enum(["ready", "offline", "busy"]),
     descriptor: GpuDescriptorSchema.optional(),
+    /** Optional so a relay or worker without plate support stays valid. */
+    plate: PlateDescriptorSchema.optional(),
   })
   .strict()
   .refine((s) => s.state !== "ready" || !!s.descriptor);
@@ -127,12 +140,16 @@ export const WorkerMessageSchema = z.union([
   WorkerHeartbeatSchema,
   GpuResultSchema,
   GpuErrorSchema,
+  PlateResultSchema,
+  PlateErrorSchema,
 ]);
 export const GpuServerMessageSchema = z.union([
   GpuStatusSchema,
   GpuResultSchema,
   GpuErrorSchema,
   GpuPongSchema,
+  PlateResultSchema,
+  PlateErrorSchema,
 ]);
 export type GpuIdentity = z.infer<typeof GpuIdentitySchema>;
 export type GpuFrameHeader = z.infer<typeof GpuFrameHeaderSchema>;

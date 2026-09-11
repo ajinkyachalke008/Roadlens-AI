@@ -1,225 +1,21 @@
-import { afterEach, describe, expect, it, vi } from "vitest";
-import { randomBytes, randomUUID } from "node:crypto";
-import { GPU_LIMITS } from "../../shared/src/limits.js";
+import { describe, expect, it, vi } from "vitest";
+import { randomUUID } from "node:crypto";
+import { GPU_LIMITS, PLATE_LIMITS } from "../../shared/src/limits.js";
 import { spawn, type ChildProcess } from "node:child_process";
-import { WebSocket, type RawData } from "ws";
-import { createRelay, type RelayConfig } from "../../backend/src/relay.js";
+import { createRelay } from "../../backend/src/relay.js";
 import * as gpuProtocol from "../../shared/src/gpu.js";
+import { decodeGpuFrame } from "../../shared/src/gpu.js";
 import {
-  decodeGpuFrame,
-  encodeGpuFrame,
-  type GpuFrameHeader,
-  type GpuResult,
-} from "../../shared/src/gpu.js";
-
-const origin = "http://127.0.0.1:5173";
-const secret = randomBytes(32).toString("base64url");
-const descriptor = {
-  modelId: "synthetic-protocol-fixture",
-  modelSha256: "0".repeat(64),
-  runtime: "pytorch_cuda" as const,
-  inputSize: 640 as const,
-};
-const cleanup: (() => Promise<unknown> | void)[] = [];
-afterEach(async () => {
-  for (const close of cleanup.splice(0).reverse()) await close();
-  vi.restoreAllMocks();
-});
-const delay = (ms = 10) => new Promise((resolve) => setTimeout(resolve, ms));
-async function until(condition: () => boolean, timeout = 2500) {
-  const deadline = Date.now() + timeout;
-  while (!condition()) {
-    if (Date.now() >= deadline)
-      throw new Error("GPU protocol condition timed out");
-    await delay();
-  }
-}
-type Json = Record<string, unknown>;
-class Client {
-  socket: WebSocket;
-  messages: Json[] = [];
-  binaries: Buffer[] = [];
-  ended = false;
-  constructor(url: string, requestedOrigin?: string) {
-    this.socket = new WebSocket(
-      url,
-      requestedOrigin === undefined ? {} : { origin: requestedOrigin },
-    );
-    this.socket.on("message", (raw: RawData, binary: boolean) => {
-      const bytes = Array.isArray(raw)
-        ? Buffer.concat(raw)
-        : Buffer.from(raw as ArrayBuffer);
-      if (binary) this.binaries.push(bytes);
-      else this.messages.push(JSON.parse(bytes.toString()));
-    });
-    this.socket.on("close", () => {
-      this.ended = true;
-    });
-    this.socket.on("error", () => {});
-    cleanup.push(() => this.socket.terminate());
-  }
-  async open() {
-    await until(() => this.socket.readyState === WebSocket.OPEN || this.ended);
-    return this;
-  }
-  send(value: unknown) {
-    this.socket.send(JSON.stringify(value));
-  }
-  async message(type: string) {
-    await until(() => this.messages.some((message) => message.type === type));
-    return this.messages.splice(
-      this.messages.findIndex((message) => message.type === type),
-      1,
-    )[0];
-  }
-}
-// Deliberately synthetic JPEG SOF framing and response metadata; these tests never claim CUDA inference.
-const jpeg = new Uint8Array([
-  255, 216, 255, 192, 0, 11, 8, 0, 2, 0, 2, 1, 1, 17, 0, 255, 217,
-]);
-const sourceId = randomUUID();
-function frame(roomId: string, seq = 1, previous?: GpuFrameHeader) {
-  const captureEpoch = previous?.captureEpoch ?? randomUUID();
-  const header: GpuFrameHeader = {
-    v: 1,
-    type: "camera.frame",
-    roomId,
-    sourceId,
-    captureEpoch,
-    frameSeq: seq,
-    frameId: `${captureEpoch}:${seq}`,
-    sourceTimeMs: seq * 100,
-    sourceWidth: 2,
-    sourceHeight: 2,
-    encodedWidth: 2,
-    encodedHeight: 2,
-    format: "image/jpeg",
-    imageLength: jpeg.length,
-  };
-  const { imageLength: _length, format: _format, ...fields } = header;
-  const result: GpuResult = {
-    ...fields,
-    type: "inference.result",
-    ...descriptor,
-    detections: [{ className: "bus", score: 0.8, bbox: [0, 0, 1, 1] }],
-    metrics: {
-      decodeMs: 1,
-      preprocessMs: 1,
-      inferenceMs: 2,
-      postprocessMs: 1,
-      totalMs: 5,
-    },
-  };
-  return { header, result, bytes: encodeGpuFrame(header, jpeg) };
-}
-async function fixture(options: Partial<RelayConfig> = {}) {
-  let clock = Date.now();
-  const relay = createRelay({
-    origins: [origin],
-    workerSecret: secret,
-    now: () => clock,
-    ...options,
-  });
-  await new Promise<void>((resolve) =>
-    relay.server.listen(0, "127.0.0.1", resolve),
-  );
-  cleanup.push(() => relay.close());
-  const address = relay.server.address();
-  if (!address || typeof address === "string")
-    throw new Error("Missing relay address");
-  const base = `http://127.0.0.1:${address.port}`;
-  const request = (
-    path: string,
-    body?: unknown,
-    token?: string,
-    method = "POST",
-  ) =>
-    fetch(base + path, {
-      method,
-      headers: {
-        Origin: origin,
-        "Content-Type": "application/json",
-        ...(token ? { Authorization: `Bearer ${token}` } : {}),
-      },
-      ...(body === undefined ? {} : { body: JSON.stringify(body) }),
-    });
-  const connect = (path: string, requestedOrigin?: string) =>
-    new Client(base.replace("http:", "ws:") + path, requestedOrigin).open();
-  const create = async (connectOwner = true) => {
-    const response = await request("/api/rooms", {
-      v: 2,
-      name: "Protocol test",
-    });
-    expect(response.status).toBe(201);
-    const room = (await response.json()) as {
-      roomId: string;
-      ownerToken: string;
-      pairingCode: string;
-    };
-    const owner = connectOwner ? await connect("/ws", origin) : null;
-    if (owner) {
-      owner.send({
-        v: 2,
-        type: "hello",
-        role: "camera",
-        roomId: room.roomId,
-        token: room.ownerToken,
-      });
-      await owner.message("hello.ok");
-    }
-    return { ...room, owner };
-  };
-  const register = async () => {
-    const worker = await connect("/worker");
-    worker.send({
-      v: 1,
-      type: "worker.register",
-      role: "worker",
-      secret,
-      workerVersion: "1",
-    });
-    await worker.message("worker.registered");
-    worker.send({ v: 1, type: "worker.ready", ...descriptor });
-    await until(() => relay.gpuWss.clients.size > 0);
-    await until(() => worker.socket.readyState === WebSocket.OPEN);
-    // A same-socket round trip orders worker.ready before the caller's camera handshake.
-    worker.send({ v: 1, type: "worker.heartbeat" });
-    await worker.message("worker.pong");
-    return worker;
-  };
-  const acquire = async (room: { roomId: string; ownerToken: string }) => {
-    const camera = await connect("/gpu", origin);
-    camera.send({
-      v: 1,
-      type: "gpu.hello",
-      role: "camera",
-      roomId: room.roomId,
-      token: room.ownerToken,
-    });
-    return camera;
-  };
-  const ready = async () => {
-    const worker = await register();
-    const room = await create();
-    const camera = await acquire(room);
-    expect((await camera.message("gpu.status")).state).toBe("ready");
-    return { worker, room, camera };
-  };
-  return {
-    relay,
-    base,
-    request,
-    connect,
-    create,
-    register,
-    acquire,
-    ready,
-    advance: (ms: number) => {
-      clock += ms;
-      relay.maintain();
-    },
-  };
-}
+  Client,
+  cleanup,
+  delay,
+  fixture,
+  frame,
+  origin,
+  secret,
+  until,
+  type Json,
+} from "./gpuFixture.js";
 
 describe("Optional GPU relay: real transport with explicit synthetic inference replies", () => {
   it("is disabled without a machine secret and exposes no machine descriptor publicly", async () => {
@@ -439,24 +235,29 @@ describe("Optional GPU relay: real transport with explicit synthetic inference r
     room.owner!.send({ v: 2, type: "ping" });
     await room.owner!.message("pong");
   });
-  it("closes a valid binary flood on message 21 before decoding it", async () => {
+  it("closes a valid binary flood one message past the ceiling, before decoding it", async () => {
     const f = await fixture();
     const { worker, room, camera } = await f.ready();
+    // The flood ceiling covers analysis frames, pings and plate requests
+    // together, so it is derived here rather than hardcoded: raising the plate
+    // budget must not silently raise what counts as an analysis flood.
+    const ceiling =
+      GPU_LIMITS.maxHz + 5 + Math.ceil(1000 / PLATE_LIMITS.minIntervalMs);
     // Call-through observation only: all real envelope validation still executes.
     const decode = vi.spyOn(gpuProtocol, "decodeGpuFrame");
     const first = frame(room.roomId);
-    for (let seq = 1; seq <= 21; seq++) {
+    for (let seq = 1; seq <= ceiling + 1; seq++) {
       camera.socket.send(frame(room.roomId, seq, first.header).bytes);
     }
     await until(() => camera.ended);
-    expect(decode).toHaveBeenCalledTimes(20);
+    expect(decode).toHaveBeenCalledTimes(ceiling);
     expect(worker.binaries).toHaveLength(1);
     expect(
       camera.messages.filter(
         (message) =>
           message.type === "inference.error" && message.code === "busy",
       ),
-    ).toHaveLength(19);
+    ).toHaveLength(ceiling - 1);
     expect(f.relay.stats().gpu).toMatchObject({
       leased: false,
       pending: 1,

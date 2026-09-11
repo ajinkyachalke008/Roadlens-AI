@@ -113,7 +113,7 @@ Numeric speed requires a fixed, approximately planar, measured setup, independen
 
 Real-field accuracy is unmeasured: no ground-truth sample, MAE, median error or maximum error exists. MEASUREMENT_RELEASE_AUDIT.md provides a safe controlled evaluation protocol recording attempted passes and unavailable coverage without encouraging unsafe driving.
 
-OCR/plates and wrong-way remain disabled. No consented readable-plate evaluation, successful integrated OCR test or complete controlled wrong-way workflow exists. Custom training has not run; 21 freshly rerun synthetic training safeguards do not establish training or accuracy. The pretrained application needs no training dataset.
+Wrong-way remains disabled. Plate recognition is implemented and measured on licensed public data (see docs/PLATE_RESULTS.md); it has no physical camera validation yet, so it ships as EXPERIMENTAL. No consented readable-plate evaluation, successful integrated OCR test or complete controlled wrong-way workflow exists. Custom training has not run; 21 freshly rerun synthetic training safeguards do not establish training or accuracy. The pretrained application needs no training dataset.
 
 ## Commands and remaining actions
 

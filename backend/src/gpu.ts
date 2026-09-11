@@ -2,7 +2,14 @@ import { createHash, timingSafeEqual } from "node:crypto";
 import type { IncomingMessage } from "node:http";
 import type { Duplex } from "node:stream";
 import { WebSocket, WebSocketServer, type RawData } from "ws";
-import { GPU_LIMITS } from "../../shared/src/limits.js";
+import { GPU_LIMITS, PLATE_LIMITS } from "../../shared/src/limits.js";
+import {
+  decodePlateFrame,
+  isPlateFrame,
+  samePlateRequest,
+  type PlateDescriptor,
+  type PlateIdentity,
+} from "../../shared/src/plates.js";
 import {
   CameraCancelSchema,
   GpuHelloSchema,
@@ -38,7 +45,12 @@ type Peer = {
   controls: number;
   controlStart: number;
 };
-type Worker = { socket: WebSocket; descriptor: GpuDescriptor | null };
+type Worker = {
+  socket: WebSocket;
+  descriptor: GpuDescriptor | null;
+  /** Present only when this worker advertised a loaded plate pipeline. */
+  plate: PlateDescriptor | null;
+};
 type Lease = {
   roomId: string;
   socket: WebSocket;
@@ -51,6 +63,11 @@ type Pending = {
   camera: WebSocket | null;
   deadline: number;
 };
+type PlatePending = {
+  identity: PlateIdentity;
+  camera: WebSocket | null;
+  deadline: number;
+};
 /**
  * Bounded analysis depth. The camera client and the worker enforce the same
  * ceiling, so no stage queues frames: the worker runs one CUDA call with at
@@ -59,6 +76,16 @@ type Pending = {
  */
 const maxInFlight = GPU_LIMITS.maxInFlight;
 const hash = (value: string) => createHash("sha256").update(value).digest();
+const plateIdentity = (frame: PlateIdentity): PlateIdentity => ({
+  roomId: frame.roomId,
+  sourceId: frame.sourceId,
+  captureEpoch: frame.captureEpoch,
+  requestId: frame.requestId,
+  frameSeq: frame.frameSeq,
+  frameId: frame.frameId,
+  trackId: frame.trackId,
+  sourceTimeMs: frame.sourceTimeMs,
+});
 const identity = (frame: GpuIdentity): GpuIdentity => ({
   roomId: frame.roomId,
   sourceId: frame.sourceId,
@@ -93,6 +120,20 @@ export function createGpuRelay(options: GpuRelayOptions) {
   /** Submitted, uncompleted identities by frameId. At most `maxInFlight`. */
   const pending = new Map<string, Pending>();
   let pendingTimer: ReturnType<typeof setTimeout> | null = null;
+  /**
+   * Plate requests are tracked separately from analysis frames and capped at
+   * `PLATE_LIMITS.maxInFlight`, so a slow or absent plate pipeline can neither
+   * consume the analysis depth budget nor delay an analysis result.
+   */
+  const platePending = new Map<string, PlatePending>();
+  let plateTimer: ReturnType<typeof setTimeout> | null = null;
+  /**
+   * Set when a plate request timed out. The worker is *not* condemned for it:
+   * plate work is an enhancement, and taking traffic detection down over an
+   * unreadable plate would be exactly the wrong trade. Further plate requests
+   * are refused for the rest of this lease instead.
+   */
+  let plateDisabled = false;
   let closed = false;
   function disconnect(socket: WebSocket, code = 1008) {
     socket.close(code, "GPU connection unavailable");
@@ -101,8 +142,11 @@ export function createGpuRelay(options: GpuRelayOptions) {
   }
   function clearPending() {
     pending.clear();
+    platePending.clear();
     if (pendingTimer) clearTimeout(pendingTimer);
     pendingTimer = null;
+    if (plateTimer) clearTimeout(plateTimer);
+    plateTimer = null;
   }
   /** Oldest deadline first; the map preserves submission order. */
   function nextDeadline() {
@@ -120,7 +164,14 @@ export function createGpuRelay(options: GpuRelayOptions) {
     const current = lease;
     if (!current || current.roomId !== roomId) return;
     lease = null;
+    plateDisabled = false;
     for (const entry of pending.values())
+      if (entry.camera === current.socket) entry.camera = null;
+    // Retire rather than forget. The worker cannot cancel a running read, so its
+    // reply is still coming; an entry that no longer exists would look like an
+    // uncorrelated message and cost the operator their worker over a routine
+    // cancel. The retired entry is discarded on arrival, or by its own timeout.
+    for (const entry of platePending.values())
       if (entry.camera === current.socket) entry.camera = null;
     if (notifyWorker && worker && options.roomExists(roomId))
       options.sendRoom(
@@ -167,6 +218,22 @@ export function createGpuRelay(options: GpuRelayOptions) {
       }
     }
     if (lease && !options.roomExists(lease.roomId)) release(lease.roomId);
+    // A plate request that overran its deadline reports back and disables plate
+    // work for this lease. It deliberately does not condemn the worker, so an
+    // unreadable plate can never cost the operator their traffic detection.
+    for (const [requestId, entry] of platePending)
+      if (time >= entry.deadline) {
+        platePending.delete(requestId);
+        plateDisabled = true;
+        if (lease && entry.camera === lease.socket)
+          sendCamera(lease, {
+            v: 1,
+            type: "plate.error",
+            roomId: entry.identity.roomId,
+            requestId,
+            code: "timeout",
+          });
+      }
     // A single expiry condemns the worker: a native call that overran its
     // deadline cannot be cancelled, so every outstanding identity is abandoned.
     const expired = [...pending.values()].filter(
@@ -234,7 +301,7 @@ export function createGpuRelay(options: GpuRelayOptions) {
               worker
             )
               throw new Error("worker authority");
-            worker = { socket, descriptor: null };
+            worker = { socket, descriptor: null, plate: null };
             options.sendGlobal(
               socket,
               JSON.stringify({
@@ -263,6 +330,9 @@ export function createGpuRelay(options: GpuRelayOptions) {
               type: "gpu.status",
               state: "ready",
               descriptor: worker!.descriptor,
+              // Omitted entirely when this worker has no plate pipeline, so the
+              // message stays byte identical to what a plate-free build sends.
+              ...(worker!.plate ? { plate: worker!.plate } : {}),
             });
           }
           peer.helloDeadline = Infinity;
@@ -276,7 +346,56 @@ export function createGpuRelay(options: GpuRelayOptions) {
           peer.controlStart = options.now();
           peer.controls = 0;
         }
-        if (++peer.controls > GPU_LIMITS.maxHz + 5) throw new Error("rate");
+        // Analysis frames, pings and plate requests share one flood bound, so
+        // the plate budget is added explicitly rather than eating into analysis.
+        if (
+          ++peer.controls >
+          GPU_LIMITS.maxHz + 5 + Math.ceil(1000 / PLATE_LIMITS.minIntervalMs)
+        )
+          throw new Error("rate");
+        if (binary && isPlateFrame(bytes)) {
+          if (peer.role !== "camera" || lease?.socket !== socket)
+            throw new Error("role");
+          const request = decodePlateFrame(bytes).header;
+          if (
+            request.roomId !== lease.roomId ||
+            !options.roomExists(request.roomId)
+          )
+            throw new Error("room");
+          const refuse = (code: "busy" | "unavailable") =>
+            sendCamera(lease!, {
+              v: 1,
+              type: "plate.error",
+              roomId: request.roomId,
+              requestId: request.requestId,
+              code,
+            });
+          if (!worker?.descriptor || !worker.plate || plateDisabled) {
+            refuse("unavailable");
+            return;
+          }
+          // One plate task system wide. A camera that asks again before the
+          // previous answer arrives is told so immediately rather than queued.
+          if (
+            platePending.size >= PLATE_LIMITS.maxInFlight ||
+            platePending.has(request.requestId) ||
+            !options.sendRoom(request.roomId, worker.socket, bytes, true)
+          ) {
+            refuse("busy");
+            return;
+          }
+          platePending.set(request.requestId, {
+            identity: plateIdentity(request),
+            camera: socket,
+            deadline: options.now() + PLATE_LIMITS.requestTimeoutMs,
+          });
+          // Own timer, so the slot is released on its own deadline rather than
+          // whenever the next message happens to run maintain().
+          if (plateTimer) clearTimeout(plateTimer);
+          plateTimer = setTimeout(maintain, PLATE_LIMITS.requestTimeoutMs);
+          plateTimer.unref();
+          return;
+        }
         if (binary) {
           if (peer.role !== "camera" || lease?.socket !== socket)
             throw new Error("role");
@@ -368,12 +487,31 @@ export function createGpuRelay(options: GpuRelayOptions) {
           if (lease || pending.size) throw new Error("model busy");
           const { modelId, modelSha256, runtime, inputSize } = message;
           worker.descriptor = { modelId, modelSha256, runtime, inputSize };
+          worker.plate = message.plate ?? null;
           return;
         }
         if (message.type === "worker.heartbeat") {
           const pong = JSON.stringify({ v: 1, type: "worker.pong" });
           if (lease) options.sendRoom(lease.roomId, socket, pong);
           else options.sendGlobal(socket, pong);
+          return;
+        }
+        if (message.type === "plate.result" || message.type === "plate.error") {
+          const outstandingPlate = platePending.get(message.requestId);
+          if (!outstandingPlate) throw new Error("plate correlation");
+          if (
+            message.type === "plate.result"
+              ? !samePlateRequest(outstandingPlate.identity, message)
+              : message.roomId !== outstandingPlate.identity.roomId
+          )
+            throw new Error("plate mismatch");
+          platePending.delete(message.requestId);
+          if (!platePending.size && plateTimer) {
+            clearTimeout(plateTimer);
+            plateTimer = null;
+          }
+          if (lease && outstandingPlate.camera === lease.socket)
+            sendCamera(lease, message);
           return;
         }
         if (
@@ -429,6 +567,9 @@ export function createGpuRelay(options: GpuRelayOptions) {
       pending: pending.size,
       retired: [...pending.values()].filter((entry) => !entry.camera).length,
       maxInFlight,
+      plateEnabled: !!worker?.plate && !plateDisabled,
+      platePending: platePending.size,
+      plateMaxInFlight: PLATE_LIMITS.maxInFlight,
     }),
     maintain,
     endRoom: (roomId: string) => release(roomId),

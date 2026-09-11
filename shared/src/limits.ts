@@ -59,3 +59,41 @@ export const GPU_LIMITS = Object.freeze({
   heartbeatMs: 15000,
   staleMs: 45000,
 });
+
+/**
+ * Plate recognition is deliberately the lowest-priority work in the system.
+ * Every bound here exists so that an unreadable, absent or slow plate pipeline
+ * can never degrade traffic detection: at most one plate task exists anywhere
+ * at a time, each track contributes a small fixed number of candidate crops,
+ * and a session can only ever have a handful of tracks under analysis.
+ */
+export const PLATE_LIMITS = Object.freeze({
+  headerBytes: 2048,
+  /** A vehicle crop is a small region, so it needs far fewer bytes than a frame. */
+  jpegTarget: 48 * 1024,
+  jpegBytes: 96 * 1024,
+  messageBytes: 128 * 1024,
+  /**
+   * Long edge of the encoded vehicle crop. The crop is taken from the full
+   * resolution source frame, so 640 px across one vehicle carries far more
+   * plate detail than the same vehicle inside a 640 px wide analysis frame.
+   */
+  cropEdge: 640,
+  /** Below this the crop cannot hold a legible plate; do not spend GPU on it. */
+  minCropEdge: 64,
+  /** One plate task in flight, system wide. The camera, relay and worker agree. */
+  maxInFlight: 1,
+  /** Bounded candidate crops retained and submitted per track. */
+  framesPerTrack: 4,
+  /** Bounded number of tracks under plate analysis at once. */
+  tracks: 8,
+  /** Submission floor, independent of the analysis rate. */
+  minIntervalMs: 220,
+  requestTimeoutMs: 3000,
+  /** Consensus needs genuine agreement, not one lucky read. */
+  minSupportingFrames: 2,
+  /** Below this the consensus is reported as unreadable rather than guessed. */
+  minConfidence: 0.55,
+  minTextLength: 2,
+  maxTextLength: 10,
+});

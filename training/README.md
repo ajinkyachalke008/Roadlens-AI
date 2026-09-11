@@ -1,5 +1,12 @@
 # Optional local model work
 
+> Plate recognition has its own self-contained tooling in
+> [training/plates/](plates/README.md): it builds its datasets from licensed
+> public sources, trains the single-class plate detector, installs it into the
+> worker's hash-pinned store, and measures it. Everything below concerns the
+> six-class traffic detector, which that work does not touch.
+
+
 The deployed app needs no Python, CUDA or development computer. Prepared public ONNX/WASM assets are already included. `npm run model:prepare` reuses and verifies packaged model files and copies the locked ORT assets without Python; `npm run model:verify` validates assets without exporting. If ONNX is missing, the command gives an explicit packaging/export error. Optional `MODEL_ASSET_BASE_URL` may point to an explicitly authorized HTTPS directory; downloads are verified against source-controlled hashes, never remote hashes. No model host URL is supplied or invented. Ultralytics artifacts carry AGPL-3.0 obligations; do not publish private code or silently relicense the project.
 
 Create an isolated environment and install the exact tested dependencies:
@@ -35,7 +42,7 @@ training/.venv/Scripts/python training/export.py --checkpoint C:/approved/run/be
 
 Class mapping comes from the actual checkpoint names. Export refuses missing semantic classes and custom outputs inside public assets. Staged custom graphs require real browser parity against their own reference and phone measurement before promotion.
 
-Promotion tool (`promote.py`) defaults to dry run. It validates plain filenames/IDs, contained paths, exact preprocessing/runtime/input/e2e output semantics, artifact bytes/class mapping, and the preserved Ultralytics AGPL notice. Raw-head promotion is rejected because the current release build only verifies the inspected e2e head. It requires supplied matching successful browser **and physical-phone** evidence. `--accept-tradeoff` records the measured reason. `--execute` copies only model/manifest and preserves prior assets plus the tradeoff in a unique ignored `training/rollback` directory. Validation JSON fields are `modelSha256`, `browserParity: "PASS"`, `physicalPhoneBenchmark: "PASS"`, and nonempty `measurements`; they must reflect actual executed checks, not manually invented success. The tool cannot authenticate assertions in a hand-supplied JSON. A staged custom-model browser-reference runner is not implemented; custom promotion remains unused and requires independently executed matching checks. Do not promote untested custom weights. OCR remains disabled.
+Promotion tool (`promote.py`) defaults to dry run. It validates plain filenames/IDs, contained paths, exact preprocessing/runtime/input/e2e output semantics, artifact bytes/class mapping, and the preserved Ultralytics AGPL notice. Raw-head promotion is rejected because the current release build only verifies the inspected e2e head. It requires supplied matching successful browser **and physical-phone** evidence. `--accept-tradeoff` records the measured reason. `--execute` copies only model/manifest and preserves prior assets plus the tradeoff in a unique ignored `training/rollback` directory. Validation JSON fields are `modelSha256`, `browserParity: "PASS"`, `physicalPhoneBenchmark: "PASS"`, and nonempty `measurements`; they must reflect actual executed checks, not manually invented success. The tool cannot authenticate assertions in a hand-supplied JSON. A staged custom-model browser-reference runner is not implemented; custom promotion remains unused and requires independently executed matching checks. Do not promote untested custom weights. Plate OCR is a separate, worker-side pipeline; see training/plates/.
 
 Safety regression command (synthetic temporary files; no training):
 

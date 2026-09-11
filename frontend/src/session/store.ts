@@ -7,6 +7,15 @@ import {
   type FrameResult,
   type CameraPolicy,
 } from "../../../shared/src/schemas";
+/** The optional plate half of a report, always supplied or omitted together. */
+export type PlateFields = Pick<
+  Report,
+  | "plateStatus"
+  | "plateText"
+  | "plateConfidence"
+  | "plateSupportingFrames"
+  | "plateDetectorConfidence"
+>;
 export class SessionStore {
   readonly reports = new Map<string, Report>();
   private images = new Map<string, Blob>();
@@ -80,6 +89,35 @@ export class SessionStore {
   get evidenceSize() {
     return this.imageBytes;
   }
+  /**
+   * Apply a plate consensus to an existing report.
+   *
+   * Consensus firms up over several frames, so a report is normally created
+   * with `plateStatus: "pending"` and updated once. Revisions are only spent
+   * when something actually changed, so a stable reading does not churn the
+   * viewer, and a report that never had plate fields never gains them.
+   */
+  applyPlate(reportId: string, plate: PlateFields) {
+    const old = this.reports.get(reportId);
+    if (!old) return false;
+    if (
+      old.plateStatus === plate.plateStatus &&
+      (old.plateText ?? null) === (plate.plateText ?? null) &&
+      (old.plateSupportingFrames ?? 0) === (plate.plateSupportingFrames ?? 0)
+    )
+      return false;
+    const next: Report = {
+      ...old,
+      ...plate,
+      revision: old.revision + 1,
+      updatedAt: new Date().toISOString(),
+    };
+    ReportSchema.parse(next);
+    this.reports.set(reportId, next);
+    this.onChange();
+    this.onReport(next);
+    return true;
+  }
   save(
     frame: FrameResult,
     policy: CameraPolicy,
@@ -88,6 +126,7 @@ export class SessionStore {
     trackId?: number,
     reportId: string = crypto.randomUUID(),
     summary?: Report["evidenceSummary"],
+    plate?: PlateFields,
   ) {
     const old = this.reports.get(reportId);
     if (old) return structuredClone(old);
@@ -136,6 +175,9 @@ export class SessionStore {
         residualM: null,
         coverageMs: null,
       },
+      // Omitted entirely when plate recognition never ran for this report, so
+      // the serialized shape stays identical to a build without the feature.
+      ...(plate ?? {}),
       evidenceId,
       evidenceState: evidenceId ? "available" : "none",
       review: "pending",

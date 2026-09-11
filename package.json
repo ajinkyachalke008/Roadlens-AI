@@ -22,7 +22,7 @@
     "test:integration": "vitest run tests/integration",
     "test:e2e": "playwright test --config playwright.config.ts",
     "test:model": "playwright test --config tests/model/playwright.config.ts",
-    "test:privacy": "node scripts/check-no-persistence.mjs && playwright test --config playwright.config.ts --grep privacy",
+    "test:privacy": "node scripts/check-no-persistence.mjs && node scripts/check-plate-privacy.mjs && playwright test --config playwright.config.ts --grep privacy",
     "smoke:cloud": "node scripts/smoke-cloud.mjs",
     "model:prepare": "node scripts/prepare-model.mjs",
     "model:verify": "node scripts/verify-model.mjs",
@@ -36,6 +36,11 @@
     "test:start": "node tests/scripts/start-worker.mjs",
     "test:worker": "node scripts/worker-python.mjs -m pytest worker/tests -q",
     "gpu:benchmark": "node scripts/worker-python.mjs -m worker.runtime.benchmark",
+    "plate:eval": "node scripts/worker-python.mjs training/plates/evaluate.py",
+    "plate:ocr-bench": "node scripts/worker-python.mjs training/plates/ocr_bench.py",
+    "plate:dataset": "node scripts/worker-python.mjs training/plates/openimages.py",
+    "plate:train": "node scripts/worker-python.mjs training/plates/train_plate.py",
+    "plate:benchmark": "node scripts/worker-python.mjs -m worker.runtime.plate_benchmark",
     "measure:production": "node scripts/measure-production.mjs"
   },
   "dependencies": {

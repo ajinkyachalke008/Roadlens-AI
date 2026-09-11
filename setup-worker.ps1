@@ -53,7 +53,8 @@ try {
         if (-not (Test-Path -LiteralPath $configPath) -and (Test-Path -LiteralPath $examplePath -PathType Leaf)) {
             Copy-Item -LiteralPath $examplePath -Destination $configPath
         }
-        Write-Host 'Setup complete. Configure .env.worker with the deployed relay URL and matching machine secret; then run .\start.ps1.'
+        Write-Host 'Setup complete. Cached models now include the optional plate artifacts when they are catalogued; start.ps1 never downloads.'
+        Write-Host 'Configure .env.worker with the deployed relay URL and matching machine secret; then run .\start.ps1.'
         $setupExitCode = 0
     }
     finally { Pop-Location }

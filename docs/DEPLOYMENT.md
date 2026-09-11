@@ -28,6 +28,28 @@ Use the existing vercel.json: repository root, npm ci, npm run build, output fro
 
 The static application contains matching model/runtime assets. No WebSocket server or neural network runs in Vercel Functions. Do not deploy backend output as a Vercel function.
 
+## Deployment order when plate support changes
+
+Deploy **Vercel first, then Render, then restart the GPU worker.** The protocol
+negotiates plate support, so neither order can corrupt anything, but this order
+is the only one with no visible interruption.
+
+The camera sends a plate request only after a `gpu.status` that advertises a
+plate pipeline, and only a relay carrying this change ever advertises one. A new
+frontend against an old relay therefore never sends a plate request at all: plate
+recognition simply reports unavailable while traffic analysis, sharing and
+reports continue untouched.
+
+The reverse order is the one with a cost. A new relay paired with a
+plate-capable worker sends a `gpu.status` carrying a `plate` field, and a browser
+still running a cached older bundle rejects it as an unknown field and drops to
+browser inference until the page is reloaded. Nothing is lost, but GPU mode
+disappears for those tabs.
+
+`render.yaml` sets `autoDeployTrigger: off`, so pushing to `main` does not
+deploy the relay. The relay must be deployed explicitly from the Render
+dashboard after the frontend is live.
+
 ## Complete split deployment once free-only authorization exists
 
 1. Supply an authorized Render workspace whose no-overage behavior is verified. Do not bypass the current restriction or modify unrelated services.

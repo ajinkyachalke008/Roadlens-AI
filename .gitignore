@@ -61,5 +61,11 @@ docs/*
 !docs/LATENCY_POLICY.md
 !docs/SPEED_VALIDATION.md
 !docs/INTELLIGENCE_PASS_DECISIONS.md
+!docs/PLATE_VALIDATION.md
+!docs/PLATE_DATASETS.md
+!docs/PLATE_RESULTS.md
 # Generated local measurements/screenshots are not corresponding source.
 tests/model/browser-results.json
+training/data/
+# Ultralytics writes here if a project directory is not set explicitly.
+runs/

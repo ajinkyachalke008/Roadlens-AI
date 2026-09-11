@@ -166,3 +166,102 @@ def result(header, output):
     for timing in metrics.values():
         number(timing, maximum=60000)
     return {"v": 1, "type": "inference.result", **{key: header[key] for key in IDENTITY_KEYS}, **descriptor(output), "detections": detections, "metrics": metrics}
+
+
+PLATE_MAX_MESSAGE = 128 * 1024
+PLATE_MAX_HEADER = 2048
+PLATE_MAX_IMAGE = 96 * 1024
+PLATE_CROP_EDGE = 640
+PLATE_MIN_CROP_EDGE = 64
+PLATE_IDENTITY_KEYS = {"roomId", "sourceId", "captureEpoch", "requestId", "frameSeq", "frameId", "trackId", "sourceTimeMs"}
+PLATE_ERRORS = {"decode_failed", "plate_failed", "busy", "timeout", "unavailable"}
+PLATE_TEXT = re.compile(r"[A-Z0-9][A-Z0-9 -]{0,8}[A-Z0-9]")
+
+
+def is_plate_frame(raw):
+    return type(raw) is bytes and len(raw) >= 4 and raw[:4] == b"RLP1"
+
+
+def plate_frame(raw):
+    """Strict RLP1 vehicle-crop validation, matching shared/src/plates.ts.
+
+    The crop is a region of the camera's full resolution frame rather than a
+    whole analysis frame, so its geometry is validated against the source frame
+    it was taken from: a header that claims a crop reaching outside its own
+    source image is rejected rather than clamped.
+    """
+    require(type(raw) is bytes and 12 <= len(raw) <= PLATE_MAX_MESSAGE and raw[:4] == b"RLP1")
+    size = struct.unpack(">I", raw[4:8])[0]
+    require(2 <= size <= PLATE_MAX_HEADER and 8 + size < len(raw))
+    header = parse_json(raw[8:8 + size], PLATE_MAX_HEADER)
+    exact(header, PLATE_IDENTITY_KEYS | {"v", "type", "format", "sourceWidth", "sourceHeight",
+                                         "cropX", "cropY", "cropWidth", "cropHeight",
+                                         "encodedWidth", "encodedHeight", "imageLength"})
+    require(type(header["v"]) is int and header["v"] == 1 and header["type"] == "camera.plate" and header["format"] == "image/jpeg")
+    for key in ("roomId", "sourceId", "captureEpoch", "requestId"):
+        identifier(header[key])
+    for key in ("frameSeq", "trackId"):
+        number(header[key], maximum=MAX_SAFE_INTEGER, integer=True)
+    require(header["frameId"] == f'{header["captureEpoch"]}:{int(header["frameSeq"])}')
+    number(header["sourceTimeMs"], maximum=MAX_SAFE_INTEGER)
+    for key in ("sourceWidth", "sourceHeight"):
+        number(header[key], 1, 8192, True)
+    require(header["sourceWidth"] * header["sourceHeight"] <= 16_777_216)
+    for key in ("cropX", "cropY", "cropWidth", "cropHeight"):
+        number(header[key], 0, 1)
+    require(header["cropWidth"] > 0 and header["cropHeight"] > 0)
+    require(header["cropX"] + header["cropWidth"] <= 1 and header["cropY"] + header["cropHeight"] <= 1)
+    for key in ("encodedWidth", "encodedHeight"):
+        number(header[key], 1, PLATE_CROP_EDGE, True)
+    require(max(header["encodedWidth"], header["encodedHeight"]) >= PLATE_MIN_CROP_EDGE)
+    number(header["imageLength"], 4, PLATE_MAX_IMAGE, True)
+    image = raw[8 + size:]
+    require(len(image) == header["imageLength"])
+    require(jpeg_dimensions(image) == (header["encodedWidth"], header["encodedHeight"]))
+    return header, image
+
+
+def plate_text(value):
+    """A reading is either a well-formed plate string or nothing at all."""
+    require(type(value) is str and 2 <= len(value) <= 10 and PLATE_TEXT.fullmatch(value) is not None)
+    return value
+
+
+def plate_result(header, output, descriptor):
+    require(type(output) is dict and type(descriptor) is dict)
+    text = output.get("plateText")
+    confidence = output.get("plateConfidence")
+    if text is None:
+        require(confidence is None)
+    else:
+        text = plate_text(text)
+        number(confidence, 0, 1)
+        confidence = float(confidence)
+    detector_confidence = output.get("detectorConfidence")
+    if detector_confidence is not None:
+        number(detector_confidence, 0, 1)
+        detector_confidence = float(detector_confidence)
+    box = output.get("plateBox")
+    if box is not None:
+        require(type(box) in {list, tuple} and len(box) == 4)
+        for coordinate in box:
+            number(coordinate, 0, 1)
+        require(box[2] > box[0] and box[3] > box[1])
+        box = [float(value) for value in box]
+    metrics = output.get("timing")
+    exact(metrics, {"decodeMs", "detectMs", "ocrMs", "totalMs"})
+    for timing in metrics.values():
+        number(timing, maximum=60000)
+    result = {key: descriptor.get(key) for key in ("detectorId", "detectorSha256", "ocrEngine", "inputSize")}
+    require(type(result["detectorId"]) is str and 1 <= len(result["detectorId"]) <= 160)
+    require(type(result["detectorSha256"]) is str and re.fullmatch(r"[a-f0-9]{64}", result["detectorSha256"]) is not None)
+    require(type(result["ocrEngine"]) is str and 1 <= len(result["ocrEngine"]) <= 80)
+    require(type(result["inputSize"]) is int and 128 <= result["inputSize"] <= 1280)
+    return {"v": 1, "type": "plate.result", **{key: header[key] for key in PLATE_IDENTITY_KEYS}, **result,
+            "plateText": text, "plateConfidence": confidence, "detectorConfidence": detector_confidence,
+            "plateBox": box, "metrics": metrics}
+
+
+def plate_error(header, code):
+    require(code in PLATE_ERRORS)
+    return {"v": 1, "type": "plate.error", "roomId": header["roomId"], "requestId": header["requestId"], "code": code}

@@ -26,6 +26,10 @@ export function csvExport(reports: Report[]) {
     "className",
     "trackId",
     "speedMps",
+    "plateStatus",
+    "plateText",
+    "plateConfidence",
+    "plateSupportingFrames",
     "review",
     "revision",
   ] as const;

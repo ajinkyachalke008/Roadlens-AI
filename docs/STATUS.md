@@ -42,7 +42,7 @@ depth 1 rather than thrashing.
 
 Still unverified: physical iPhone behaviour after these changes, field speed
 accuracy, and detection quality metrics (no licensed traffic evaluation set).
-Plate OCR and wrong-way remain disabled; no training ran.
+Wrong-way remains disabled. Plate recognition is implemented on the optional GPU worker and validated on licensed public data; a single-class plate detector was trained locally from the pinned official YOLO26n checkpoint. Physical plate validation with a real camera has not been performed. See docs/PLATE_RESULTS.md.
 
 
 ## GPU upgrade — active September 11, 2026

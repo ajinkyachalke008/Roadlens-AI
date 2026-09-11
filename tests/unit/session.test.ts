@@ -382,7 +382,9 @@ describe("B25 explicit safe JSON/CSV exports", () => {
   it("exports explicit source mode and empty unavailable speed cells", () => {
     const output = csvExport([report()]);
     expect(output).toContain('"synthetic_test"');
-    expect(output).toContain('"car","1","","pending","0"');
+    // A report that never ran plate recognition exports empty plate cells
+    // rather than omitting the columns, so every row keeps the same shape.
+    expect(output).toContain('"car","1","","","","","","pending","0"');
     expect(output).not.toContain("NaN");
   });
 });

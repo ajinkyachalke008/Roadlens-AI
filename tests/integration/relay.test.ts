@@ -709,6 +709,59 @@ describe("B10/B11/B44 RAM relay protocol", () => {
     expect(f.relay.stats().rooms).toBe(0);
     expect(f.relay.stats().bootBytes).toBeLessThanOrEqual(3300);
   });
+  it("synchronises plate fields to viewers without disturbing plate-free reports", async () => {
+    const f = await fixture();
+    const { owner, client } = await f.pair();
+    // A report from a camera that never ran plate recognition must reach the
+    // viewer byte for byte as a build without the feature would have sent it.
+    const legacy = syntheticReport(1);
+    owner.send({ v: 2, type: "report.upsert", report: legacy });
+    const received = await client.message("report.upsert");
+    expect(received.report).toEqual(legacy);
+    expect(Object.keys(received.report as object)).not.toContain("plateStatus");
+    // A settled reading travels intact, including the frames that agreed.
+    const read = {
+      ...syntheticReport(2),
+      plateStatus: "read" as const,
+      plateText: "ABC1234",
+      plateConfidence: 0.91,
+      plateSupportingFrames: 3,
+      plateDetectorConfidence: 0.82,
+    };
+    owner.send({ v: 2, type: "report.upsert", report: read });
+    expect((await client.message("report.upsert")).report).toEqual(read);
+    // So does a revision that later downgrades the same report to unreadable.
+    const downgraded = {
+      ...read,
+      revision: 1,
+      plateStatus: "unreadable" as const,
+      plateText: null,
+      plateConfidence: null,
+      plateDetectorConfidence: 0.4,
+    };
+    owner.send({ v: 2, type: "report.upsert", report: downgraded });
+    expect((await client.message("report.upsert")).report).toEqual(downgraded);
+  });
+  it("refuses a report claiming a plate no frames agreed on", async () => {
+    const f = await fixture();
+    const { owner, client } = await f.pair();
+    owner.send({
+      v: 2,
+      type: "report.upsert",
+      report: {
+        ...syntheticReport(3),
+        plateStatus: "read",
+        plateText: "ABC1234",
+        plateConfidence: 0.99,
+        plateSupportingFrames: 1,
+        plateDetectorConfidence: 0.9,
+      },
+    });
+    await eventually(() => owner.ended);
+    expect(
+      client.messages.some((message) => message.type === "report.upsert"),
+    ).toBe(false);
+  });
   it("reports source-offline requests and limits exact cross-room capabilities", async () => {
     const f = await fixture();
     const a = await f.pair();

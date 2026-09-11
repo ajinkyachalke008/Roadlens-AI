@@ -16,6 +16,9 @@ class Config:
     model_mode: str = "balanced"
     runtime: str = "pytorch_cuda"
     device: int = 0
+    plate: str = "auto"
+    plate_ocr: str = "fast-plate-ocr"
+    plate_preprocess: str = "none"
 
     @classmethod
     def from_env(cls, env=None):
@@ -47,4 +50,16 @@ class Config:
         device = env.get("ROADLENS_GPU_DEVICE", "0")
         if not re.fullmatch(r"\d{1,2}", device):
             raise ConfigurationError("ROADLENS_GPU_DEVICE must be a nonnegative device index")
-        return cls(url, secret, mode, runtime, int(device))
+        # "auto" enables plate recognition only when its artifacts are actually
+        # prepared. "off" keeps the traffic pipeline byte for byte what a build
+        # without the feature runs, which is what the performance gate compares.
+        plate = env.get("ROADLENS_PLATE", "auto")
+        plate_ocr = env.get("ROADLENS_PLATE_OCR", "fast-plate-ocr")
+        plate_preprocess = env.get("ROADLENS_PLATE_PREPROCESS", "none")
+        if plate not in {"auto", "on", "off"}:
+            raise ConfigurationError("ROADLENS_PLATE must be auto, on, or off")
+        if plate_ocr not in {"fast-plate-ocr", "rapidocr"}:
+            raise ConfigurationError("ROADLENS_PLATE_OCR must name a supported OCR engine")
+        if plate_preprocess not in {"none", "gray", "clahe", "sharpen", "rectify"}:
+            raise ConfigurationError("ROADLENS_PLATE_PREPROCESS must name a supported variant")
+        return cls(url, secret, mode, runtime, int(device), plate, plate_ocr, plate_preprocess)

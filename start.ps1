@@ -11,7 +11,7 @@ try {
     if (-not (Test-Path -LiteralPath $workerPython -PathType Leaf)) {
         throw 'Worker environment is missing. Run .\setup-worker.ps1 once.'
     }
-    $allowedKeys = @('ROADLENS_RELAY_URL', 'ROADLENS_WORKER_SECRET', 'ROADLENS_MODEL_MODE', 'ROADLENS_GPU_RUNTIME', 'ROADLENS_GPU_DEVICE', 'ROADLENS_ALLOW_LOOPBACK', 'ALLOW_WORKER_CPU_FALLBACK')
+    $allowedKeys = @('ROADLENS_RELAY_URL', 'ROADLENS_WORKER_SECRET', 'ROADLENS_MODEL_MODE', 'ROADLENS_GPU_RUNTIME', 'ROADLENS_GPU_DEVICE', 'ROADLENS_ALLOW_LOOPBACK', 'ALLOW_WORKER_CPU_FALLBACK', 'ROADLENS_PLATE', 'ROADLENS_PLATE_OCR', 'ROADLENS_PLATE_PREPROCESS')
     if (Test-Path -LiteralPath $configPath -PathType Leaf) {
         $seenKeys = @{}
         foreach ($configLine in [System.IO.File]::ReadAllLines($configPath)) {

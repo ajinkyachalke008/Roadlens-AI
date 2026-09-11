@@ -1,4 +1,11 @@
-import { GPU_LIMITS } from "../../../shared/src/limits";
+import { GPU_LIMITS, PLATE_LIMITS } from "../../../shared/src/limits";
+import {
+  encodePlateFrame,
+  samePlateRequest,
+  type PlateDescriptor,
+  type PlateIdentity,
+  type PlateResult,
+} from "../../../shared/src/plates";
 import {
   encodeGpuFrame,
   GpuServerMessageSchema,
@@ -33,6 +40,15 @@ export interface GpuDiagnostics {
   maxInFlight: number;
 }
 export class GpuUnavailableError extends Error {}
+/** Plate recognition is absent or refused this request; traffic is unaffected. */
+export class PlateUnavailableError extends Error {}
+export type PlateRequest = Omit<
+  PlateIdentity,
+  "roomId" | "requestId"
+> & {
+  /** Vehicle box in the source frame, normalised, already padded. */
+  crop: { x: number; y: number; width: number; height: number };
+};
 /** Transient congestion drops this frame without invalidating the GPU connection. */
 export class GpuDroppedFrameError extends Error {}
 const minimumSendIntervalMs = 1000 / GPU_LIMITS.maxHz + 5;
@@ -59,7 +75,25 @@ interface PendingJob {
  */
 export class RemoteDetector {
   descriptor: GpuDescriptor | null = null;
+  /** Non-null only while a worker with a loaded plate pipeline is leased. */
+  plateDescriptor: PlateDescriptor | null = null;
   ready = false;
+  private platePending = new Map<
+    string,
+    {
+      identity: PlateIdentity;
+      resolve: (value: PlateResult) => void;
+      reject: (error: Error) => void;
+      timer: ReturnType<typeof setTimeout>;
+    }
+  >();
+  private lastPlateSentAt = -Infinity;
+  get plateAvailable() {
+    return !!this.plateDescriptor && this.ready && !this.disposed;
+  }
+  get plateInFlight() {
+    return this.platePending.size;
+  }
   private measurements: Omit<
     GpuDiagnostics,
     "submittedHz" | "resultHz" | "inFlight" | "maxInFlight"
@@ -180,6 +214,7 @@ export class RemoteDetector {
               return;
             }
             this.descriptor = m.descriptor!;
+            this.plateDescriptor = m.plate ?? null;
             this.ready = true;
             clearTimeout(timer);
             resolve();
@@ -211,6 +246,10 @@ export class RemoteDetector {
               this.measurements.rttMs = performance.now() - this.ping.started;
               this.ping = null;
             }
+          } else if (m.type === "plate.error") {
+            this.settlePlate(m.requestId, null, m.code);
+          } else if (m.type === "plate.result") {
+            this.settlePlate(m.requestId, m, null);
           } else if (m.type === "inference.error") {
             const job = this.pending.get(m.frameId);
             if (job && m.roomId === job.identity.roomId) {
@@ -406,6 +445,131 @@ export class RemoteDetector {
       scaled.height = 1;
     }
   }
+  private settlePlate(
+    requestId: string,
+    result: PlateResult | null,
+    code: string | null,
+  ) {
+    const job = this.platePending.get(requestId);
+    if (!job) return;
+    // Correlate by exact identity. A reply whose track or epoch differs from
+    // what was asked belongs to nothing this camera can still use.
+    if (result && !samePlateRequest(job.identity, result)) return;
+    this.platePending.delete(requestId);
+    clearTimeout(job.timer);
+    if (result) job.resolve(result);
+    else job.reject(new PlateUnavailableError(code ?? "plate_failed"));
+  }
+  /**
+   * Submit one vehicle crop for plate recognition.
+   *
+   * The crop is taken from `canvas`, which is the camera's full resolution
+   * source frame rather than the downscaled analysis frame, because that is the
+   * only place the plate pixels ever existed. Rejection is always cheap and
+   * never invalidates the GPU connection: plate work is an enhancement.
+   */
+  async readPlate(
+    canvas: HTMLCanvasElement,
+    request: PlateRequest,
+  ): Promise<PlateResult> {
+    if (!this.plateAvailable || !this.socket)
+      throw new PlateUnavailableError("Plate recognition unavailable");
+    if (this.platePending.size >= PLATE_LIMITS.maxInFlight)
+      throw new PlateUnavailableError("Plate recognition busy");
+    if (performance.now() - this.lastPlateSentAt < PLATE_LIMITS.minIntervalMs)
+      throw new PlateUnavailableError("Plate request rate limited");
+    const { crop, ...identity } = request;
+    const sourceWidth = canvas.width;
+    const sourceHeight = canvas.height;
+    const pixelWidth = Math.round(crop.width * sourceWidth);
+    const pixelHeight = Math.round(crop.height * sourceHeight);
+    if (
+      Math.max(pixelWidth, pixelHeight) < PLATE_LIMITS.minCropEdge ||
+      pixelWidth < 1 ||
+      pixelHeight < 1
+    )
+      throw new PlateUnavailableError("Vehicle crop is too small to read");
+    const scaled = document.createElement("canvas");
+    try {
+      // Never upscale here: enlarging on the phone would only cost bytes, and
+      // the worker resizes to its own OCR scale anyway.
+      const scale = Math.min(
+        1,
+        PLATE_LIMITS.cropEdge / Math.max(pixelWidth, pixelHeight),
+      );
+      scaled.width = Math.max(1, Math.round(pixelWidth * scale));
+      scaled.height = Math.max(1, Math.round(pixelHeight * scale));
+      scaled
+        .getContext("2d")!
+        .drawImage(
+          canvas,
+          Math.round(crop.x * sourceWidth),
+          Math.round(crop.y * sourceHeight),
+          pixelWidth,
+          pixelHeight,
+          0,
+          0,
+          scaled.width,
+          scaled.height,
+        );
+      let blob: Blob | null = null;
+      for (const quality of [0.8, 0.65, 0.5]) {
+        blob = await new Promise<Blob | null>((resolve) =>
+          scaled.toBlob(resolve, "image/jpeg", quality),
+        );
+        if (blob && blob.size <= PLATE_LIMITS.jpegTarget) break;
+      }
+      if (!blob || blob.size > PLATE_LIMITS.jpegBytes)
+        throw new PlateUnavailableError("Plate crop exceeds limit");
+      const jpeg = new Uint8Array(await blob.arrayBuffer());
+      if (
+        !this.plateAvailable ||
+        this.socket.readyState !== WebSocket.OPEN ||
+        this.platePending.size >= PLATE_LIMITS.maxInFlight
+      )
+        throw new PlateUnavailableError("Plate recognition unavailable");
+      const full: PlateIdentity = {
+        ...identity,
+        roomId: this.room.roomId,
+        requestId: crypto.randomUUID(),
+      };
+      const packet = encodePlateFrame(
+        {
+          v: 1,
+          type: "camera.plate",
+          format: "image/jpeg",
+          ...full,
+          sourceWidth,
+          sourceHeight,
+          cropX: crop.x,
+          cropY: crop.y,
+          cropWidth: crop.width,
+          cropHeight: crop.height,
+          encodedWidth: scaled.width,
+          encodedHeight: scaled.height,
+          imageLength: jpeg.length,
+        },
+        jpeg,
+      );
+      return await new Promise<PlateResult>((resolve, reject) => {
+        const timer = setTimeout(
+          () => this.settlePlate(full.requestId, null, "timeout"),
+          PLATE_LIMITS.requestTimeoutMs,
+        );
+        this.platePending.set(full.requestId, {
+          identity: full,
+          resolve,
+          reject,
+          timer,
+        });
+        this.socket!.send(packet.buffer as ArrayBuffer);
+        this.lastPlateSentAt = performance.now();
+      });
+    } finally {
+      scaled.width = 1;
+      scaled.height = 1;
+    }
+  }
   private drop(reason: string): GpuDroppedFrameError {
     this.measurements.dropped++;
     this.measurements.backoffMs = Math.min(
@@ -483,6 +647,12 @@ export class RemoteDetector {
     for (const job of this.pending.values())
       job.reject(new GpuUnavailableError("GPU result canceled"));
     this.pending.clear();
+    for (const job of this.platePending.values()) {
+      clearTimeout(job.timer);
+      job.reject(new PlateUnavailableError("Plate result canceled"));
+    }
+    this.platePending.clear();
+    this.plateDescriptor = null;
     if (this.socket) {
       if (this.socket.readyState === WebSocket.OPEN)
         this.socket.send(

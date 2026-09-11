@@ -2,6 +2,24 @@
 
 Source/artifact audit followed by authorized bounded inference/training fixes for the release-hardening request. No model was replaced, no OCR dependency/weight/data was downloaded, and no training started. Initial findings below describe the inspected pre-fix state; the disposition and freshly executed checks follow them. Public deployment, physical-phone performance and real field speed remain unverified.
 
+> **Superseded for plate recognition, 2026-09-11.** The decision recorded below
+> was correct for the evidence available at the time, and it named the exact
+> conditions an implementation would have to meet: a real localized plate, actual
+> OCR, multiple agreeing readings, null on ambiguity, candidate-only retention,
+> bounded crops and jobs, release-on-end, and measured coexistence with the
+> traffic detector. Those conditions are now met and measured. The reasoning here
+> is kept as the record of why the feature waited; the current design,
+> measurements and remaining limits are in
+> [PLATE_VALIDATION.md](PLATE_VALIDATION.md), [PLATE_DATASETS.md](PLATE_DATASETS.md)
+> and [PLATE_RESULTS.md](PLATE_RESULTS.md).
+>
+> Two judgements below were revised by measurement rather than by opinion. The
+> phone-compute objection was correct and is why plate work runs entirely on the
+> GPU worker and never on the phone. The "≤640-pixel sampled image" objection was
+> also correct, and is why a plate request carries a crop of one vehicle taken
+> from the phone's full-resolution canvas rather than anything from the analysis
+> stream.
+
 ## Release decision: keep plate recognition disabled
 
 **Plate recognition — experimental / future extension.** The current application has no plate detector, OCR worker, language assets, plate decoder, plate confidence/consensus module, consented labeled plate fixtures, or measured phone OCR budget. The public model directory contains exactly two YOLO26n traffic ONNX files and their manifests/license. `package.json` and `package-lock.json` contain no Tesseract/plate OCR package. Shared reports contain no plate result fields. No text is being guessed or exported as a plate.

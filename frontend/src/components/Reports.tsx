@@ -4,6 +4,34 @@ import type { SessionStore } from "../session/store";
 import { csvExport, jsonExport, download } from "../session/export";
 import { displaySpeed, type SpeedUnit } from "./speedUnits";
 import { Drawer } from "./Drawer";
+/**
+ * One settled line of plate text for a report.
+ *
+ * Intermediate OCR strings never reach this function: the camera only writes a
+ * reading into a report once multi-frame consensus has settled, so the card
+ * shows a value, an honest "Analyzing…", or an honest "Unreadable" — never a
+ * guess that changes under the reader's eyes.
+ */
+export function plateLabel(report: Report) {
+  switch (report.plateStatus) {
+    case "read":
+      return report.plateText
+        ? `${report.plateText}${
+            typeof report.plateConfidence === "number"
+              ? ` · ${(report.plateConfidence * 100).toFixed(0)}%`
+              : ""
+          }`
+        : "Unreadable";
+    case "pending":
+      return "Analyzing…";
+    case "unreadable":
+      return "Unreadable";
+    case "unavailable":
+      return "Plate unavailable";
+    default:
+      return null;
+  }
+}
 export function Reports({
   store,
   revision,
@@ -117,6 +145,13 @@ export function Reports({
                     {r.sourceMode === "replay_video" ? "Replay · " : ""}
                     {r.className ?? "Scene"}{" "}
                     {r.trackId !== null ? "#" + r.trackId : ""}
+                    {/* The row is a fixed grid, so the plate rides along with
+                        the object line rather than claiming a column of its
+                        own; the full reading and its confidence are in the
+                        detail view. */}
+                    {r.plateStatus === "read" && r.plateText
+                      ? ` · ${r.plateText}`
+                      : ""}
                   </small>
                 </span>
                 <span className="report-speed">
@@ -184,6 +219,22 @@ export function Reports({
                 ? "—"
                 : displaySpeed(report.speedMps, speedUnit)}
             </dd>
+            {plateLabel(report) !== null && (
+              <>
+                <dt>Plate</dt>
+                <dd
+                  data-testid="report-plate"
+                  data-plate-status={report.plateStatus}
+                  title={
+                    report.plateStatus === "read"
+                      ? `Agreed across ${report.plateSupportingFrames ?? 0} frames`
+                      : "Plate recognition is a review aid, never an identification"
+                  }
+                >
+                  {plateLabel(report)}
+                </dd>
+              </>
+            )}
             <dt>Validity</dt>
             <dd>
               {report.speedMps === null

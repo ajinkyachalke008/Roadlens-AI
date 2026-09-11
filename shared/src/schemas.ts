@@ -1,5 +1,6 @@
 import { z } from "zod";
-import { LIMITS } from "./limits.js";
+import { LIMITS, PLATE_LIMITS } from "./limits.js";
+import { PlateTextSchema } from "./plates.js";
 export const Classes = [
   "person",
   "bicycle",
@@ -139,6 +140,19 @@ export const ReportSchema = z
         coverageMs: nonnegative.nullable(),
       })
       .strict(),
+    /**
+     * Plate fields are optional as well as nullable. A camera that never ran
+     * plate recognition omits them entirely, so its reports are byte identical
+     * to those a build without this feature produced, and an older viewer's
+     * strict schema still accepts them.
+     */
+    plateStatus: z
+      .enum(["unavailable", "pending", "unreadable", "read"])
+      .optional(),
+    plateText: PlateTextSchema.nullable().optional(),
+    plateConfidence: finite.min(0).max(1).nullable().optional(),
+    plateSupportingFrames: seq.max(PLATE_LIMITS.framesPerTrack).optional(),
+    plateDetectorConfidence: finite.min(0).max(1).nullable().optional(),
     evidenceId: id.nullable(),
     evidenceState: z.enum(["none", "available", "evicted"]),
     review: z.enum(["pending", "noted", "dismissed"]),
@@ -152,6 +166,19 @@ export const ReportSchema = z
       r.frameId.startsWith(r.captureEpoch + ":") &&
       /^(0|[1-9][0-9]*)$/.test(r.frameId.slice(r.captureEpoch.length + 1)) &&
       Number.isSafeInteger(Number(r.frameId.slice(r.captureEpoch.length + 1))),
+  )
+  .refine(
+    // A readable plate must carry its confidence and the frames that agreed;
+    // any other status must not carry text at all.
+    (r) =>
+      r.plateStatus === "read"
+        ? typeof r.plateText === "string" &&
+          typeof r.plateConfidence === "number" &&
+          (r.plateSupportingFrames ?? 0) >= PLATE_LIMITS.minSupportingFrames
+        : r.plateText === null || r.plateText === undefined,
+  )
+  .refine(
+    (r) => r.plateStatus !== undefined || r.plateText === undefined,
   )
   .refine(
     (r) =>

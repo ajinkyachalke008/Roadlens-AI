@@ -35,6 +35,8 @@ import { SpeedValidationSession } from "../validation/speedTrial";
 import type { SpeedEstimate } from "../geometry/speed";
 import { speedFactor, type SpeedUnit } from "../components/speedUnits";
 import { RemoteDetector } from "../inference/remote";
+import { PlateCapture, type PlateCaptureMode } from "../plates/capture";
+import { plateFields } from "../plates/report";
 export default function Camera() {
   const video = useRef<HTMLVideoElement>(null);
   const capture = useRef<CameraCapture | null>(null);
@@ -54,6 +56,16 @@ export default function Camera() {
   >(null);
   // Session-scoped, RAM-only, cleared with everything else at End session.
   const validation = useRef(new SpeedValidationSession());
+  /**
+   * Plate crops, readings and consensus live only here, for this session. They
+   * are never written to a report until consensus settles, never persisted and
+   * never logged.
+   */
+  const plates = useRef(new PlateCapture()).current;
+  const [plateMode, setPlateMode] = useState<PlateCaptureMode>("candidates");
+  const [plateRevision, setPlateRevision] = useState(0);
+  /** Reports whose plate consensus is still being followed, by track. */
+  const plateReports = useRef(new Map<number, string>()).current;
   const [validationRevision, setValidationRevision] = useState(0);
   const estimates = useRef(new Map<number, SpeedEstimate>());
   const [evidence, setEvidence] = useState(false);
@@ -242,8 +254,18 @@ export default function Camera() {
           : "",
       );
     };
+    plates.onChange = () => {
+      if (!mounted.current) return;
+      // A consensus can settle after the last frame of a vehicle, so flushing
+      // only from onFrame would leave the final reading stranded on a report
+      // that stays "Analyzing…" forever.
+      flushPlates();
+      setPlateRevision((value) => value + 1);
+    };
     c.onReset = () => {
       setFrame(null);
+      plates.reset();
+      plateReports.clear();
       setCalibrationStatus("Source changed · measurement reset");
       setDrawer((current) => (current === "calibration" ? null : current));
       lastCameraStatus.current = "";
@@ -286,9 +308,15 @@ export default function Camera() {
             ? "Camera moved · recalibrate"
             : "Handheld / uncalibrated · detection only",
       );
+      plates.observe(completed.result, completed.canvas, c.remote);
+      flushPlates();
       for (const candidate of completed.candidates) {
         const id = store.episodeId(candidate.episodeKey);
         if (!id || store.reports.has(id)) continue;
+        // A speed candidate is exactly the qualified workflow plate reading is
+        // for, so ask for this vehicle explicitly and follow its consensus.
+        plates.request(candidate.trackId);
+        if (plateReports.size < 32) plateReports.set(candidate.trackId, id);
         store.save(
           completed.result,
           completed.policy,
@@ -304,6 +332,7 @@ export default function Camera() {
             residualM: candidate.estimate.residualM,
             coverageMs: candidate.estimate.coverageMs,
           },
+          plateFields(plates.state(candidate.trackId)) ?? undefined,
         );
       }
       const client = relay.current;
@@ -366,6 +395,8 @@ export default function Camera() {
       relay.current = null;
       roomRef.current = null;
       store.clear();
+      plates.reset();
+      plateReports.clear();
       setFrame(null);
       setRoom(null);
       setStatus("Ended");
@@ -424,8 +455,20 @@ export default function Camera() {
       c.end();
       relay.current?.close();
       store.clear();
+      plates.reset();
+      plateReports.clear();
     };
   }, [store]);
+  useEffect(() => {
+    plates.mode = plateMode;
+  }, [plateMode, plates]);
+  /** Carry every settled plate consensus onto the report that is following it. */
+  const flushPlates = useRef(() => {
+    for (const [trackId, reportId] of plateReports) {
+      const plate = plateFields(plates.state(trackId));
+      if (plate) store.applyPlate(reportId, plate);
+    }
+  }).current;
   async function start(file?: File | null) {
     setError("");
     const life = lifecycle.current;
@@ -789,7 +832,7 @@ export default function Camera() {
       )}
       <Reports
         store={store}
-        revision={revision}
+        revision={revision + plateRevision}
         speedUnit={speedUnit}
         onReview={(r: Report, s) => store.review(r.reportId, r.revision, s)}
       />
@@ -969,6 +1012,45 @@ export default function Camera() {
             GPU mode sends bounded analysis images to your connected worker,
             even without viewers. Switching clears tracking and calibration.
             Browser fallback stays available.
+          </p>
+          <hr />
+          <h3>Plate recognition</h3>
+          <label>
+            When to read plates
+            <select
+              aria-label="Plate capture mode"
+              value={plateMode}
+              onChange={(event) =>
+                setPlateMode(event.target.value as PlateCaptureMode)
+              }
+            >
+              <option value="candidates">Speed candidates only</option>
+              <option value="off">Off</option>
+              <option value="all">Every tracked vehicle (testing)</option>
+            </select>
+          </label>
+          <dl className="gpu-diagnostics" data-testid="plate-diagnostics">
+            <dt>Availability</dt>
+            <dd>
+              {capture.current?.remote
+                ? plates.diagnostics.available
+                  ? (capture.current.remote.plateDescriptor?.ocrEngine ??
+                    "worker plate pipeline")
+                  : "Plate unavailable on this worker"
+                : "GPU worker not connected"}
+            </dd>
+            <dt>Reads</dt>
+            <dd>
+              {plates.diagnostics.completed} completed ·{" "}
+              {plates.diagnostics.refused} refused ·{" "}
+              {plates.diagnostics.medianMs.toFixed(0)} ms median
+            </dd>
+          </dl>
+          <p className="footnote">
+            Plate work runs only on your GPU worker, only for qualified
+            vehicles, and never on the phone. Readings live in memory for this
+            session and are cleared by End session. “Every tracked vehicle” is
+            for your own permitted testing, not normal monitoring.
           </p>
           <details className="diagnostics">
             <summary>Advanced diagnostics</summary>
@@ -1298,6 +1380,8 @@ export default function Camera() {
             onClick={() => {
               capture.current?.end();
               store.clear();
+              plates.reset();
+              plateReports.clear();
               validation.current.clear();
               estimates.current = new Map();
               setValidationRevision(0);

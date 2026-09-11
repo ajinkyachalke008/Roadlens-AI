@@ -55,6 +55,11 @@ npm run test:worker
 npm run test:start
 npm run test:gpu
 npm run gpu:benchmark
+# Optional plate pipeline, on licensed public data downloaded on demand:
+npm run plate:dataset
+node scripts/worker-python.mjs training/plates/openalpr_us.py --region us
+npm run plate:ocr-bench
+npm run plate:eval -- --suite us
 ```
 
 The real-model browser tests use a permitted official sample photograph with recorded provenance. They prove execution and reference parity, not field detection quality. Exact results and external gates are in [the handoff](docs/FINAL_HANDOFF.md).
@@ -73,7 +78,39 @@ Official YOLO26n fixed FP32 ONNX profiles416 and320 use matching ORT1.29.0 singl
 
 The implemented tracker is time_aware_iou_v1, inspired by ByteTrack; it is not an official ByteTrack port. Numeric speed requires measured planar calibration, an independent check, a stationary background, stable identity and sufficient actual source-time observations. Otherwise speed is null/“—”. An accepted calibration is graded Valid or Weak, and a Weak grade names the marginal property. Speed validation tooling records measured-versus-reference trials and computes MAE, median, p95, maximum and signed bias; [the procedure and the empty results table](docs/SPEED_VALIDATION.md) make clear that no physical field accuracy has been measured yet. Persistence and episode deduplication gate speed candidates. Entered limits and margins are demo settings. Candidates are for human review, never automated legal citations. Field-speed accuracy and physical-phone performance remain unverified until measured.
 
-Plate recognition and wrong-way alerts are disabled. No custom training ran. [Optional local training tools](training/README.md) do not block use of the pretrained application.
+Wrong-way alerts are disabled. [Optional local training tools](training/README.md) do not block use of the pretrained application.
+
+## Plate recognition
+
+Plates are read on the local GPU worker, never on the phone, and only for a
+vehicle something already qualified: an operator selection or a speed candidate.
+A dedicated single-class YOLO26n localizer and a plate OCR engine run on a
+vehicle crop taken from the phone's **full resolution** frame, so the plate is
+described by a 640px budget instead of a dozen pixels inside a 640px view of the
+whole road. At most one plate task exists anywhere at a time, and the worker only
+accepts one when no analysis frame is running or waiting, so plate work can never
+queue in front of traffic detection.
+
+A reading is never trusted from one frame. Up to four crops per track are scored
+on size, sharpness, framing and pose; each returns one reading; agreement across
+them decides the answer. Confusable glyphs (0/O, 1/I, 5/S, 8/B) are grouped for
+voting but never substituted, and no regional plate regex is applied. Below the
+agreement and confidence floors the report says **Unreadable** rather than
+guessing, and plate text never appears over vehicles in the overlay.
+
+The worker keeps no crop, reading or history between requests. Crops, readings
+and consensus live in phone RAM for one capture epoch and are cleared by a source
+change, a seek, or End session. There is no plate database, archive, telemetry or
+local storage, and plate strings are never logged.
+
+Plate support is optional at every layer. A worker without the model or OCR
+packages advertises no plate pipeline, the report shows **Plate unavailable**,
+and traffic detection, tracking, speed, sharing and reports are unaffected.
+
+Measured accuracy, bounds, the evaluation command and the honest limits are in
+[PLATE_VALIDATION.md](docs/PLATE_VALIDATION.md); dataset and model provenance is
+in [PLATE_DATASETS.md](docs/PLATE_DATASETS.md); results and status are in
+[PLATE_RESULTS.md](docs/PLATE_RESULTS.md).
 
 ## Hosting and release
 

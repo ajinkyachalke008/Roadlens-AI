@@ -9,6 +9,8 @@ import urllib.request
 from pathlib import Path
 from worker.vision.detector import MODEL_DIR,MODEL_CATALOG,MODELS
 
+PLATE_CATALOG=MODEL_DIR.parent/'plate-catalog.json'
+
 
 def digest(path):return hashlib.sha256(path.read_bytes()).hexdigest()
 
@@ -75,9 +77,55 @@ def prepare(model_modes=('fast','balanced','quality'),build_tensorrt=False):
         print(f'{name}: verified checkpoint and fixed 640 ONNX'+(' / TensorRT engine' if build_tensorrt else ''))
 
 
+
+
+def prepare_plates(ocr_engine='fast-plate-ocr',device=0):
+    """Cache the optional plate artifacts once, so start.ps1 never downloads.
+
+    Both halves are optional and independent. A worker with neither still runs
+    the full traffic pipeline; it simply does not advertise plate support.
+    """
+    prepared={'detector':None,'ocr':None}
+    if PLATE_CATALOG.is_file():
+        entry=json.loads(PLATE_CATALOG.read_text())['detector']
+        path=MODEL_DIR/entry['file']
+        if not path.is_file():
+            base=os.environ.get('PLATE_MODEL_ASSET_BASE_URL')
+            if not base:
+                print('Plate detector is catalogued but not present. Train it with '
+                      'training/plates/train_plate.py, or set PLATE_MODEL_ASSET_BASE_URL '
+                      'to an explicitly authorized HTTPS directory.')
+                return prepared
+            if not base.startswith('https://'):
+                raise RuntimeError('PLATE_MODEL_ASSET_BASE_URL must be HTTPS')
+            with urllib.request.urlopen(base.rstrip('/')+'/'+entry['file'],timeout=120) as response:
+                payload=response.read(entry['bytes']+1)
+            # Verified against the source-controlled hash, never a remote one.
+            if len(payload)!=entry['bytes'] or hashlib.sha256(payload).hexdigest()!=entry['sha256']:
+                raise RuntimeError('Plate detector integrity mismatch')
+            path.write_bytes(payload)
+        if path.stat().st_size!=entry['bytes'] or digest(path)!=entry['sha256']:
+            raise RuntimeError('Cached plate detector integrity mismatch')
+        prepared['detector']=entry['modelId']
+        print(f"plate detector: verified {entry['modelId']}")
+    else:
+        print('No plate detector catalogued; the worker will run traffic analysis only.')
+    try:
+        from worker.vision.plates import load_ocr
+        engine=load_ocr(ocr_engine,device=device,use_cuda=False)
+        engine.close()
+        prepared['ocr']=ocr_engine
+        print(f'plate OCR: cached {ocr_engine} weights')
+    except Exception:
+        print('Plate OCR packages are unavailable; the worker will run traffic analysis only.')
+    return prepared
+
+
 def main():
     p=argparse.ArgumentParser();p.add_argument('--models',nargs='+',choices=list(MODELS),default=list(MODELS));p.add_argument('--build-tensorrt',action='store_true')
+    p.add_argument('--skip-plates',action='store_true')
     args=p.parse_args();prepare(args.models,args.build_tensorrt)
+    if not args.skip_plates:prepare_plates()
 
 
 if __name__=='__main__':main()

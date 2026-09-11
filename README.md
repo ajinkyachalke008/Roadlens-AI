@@ -2,7 +2,7 @@
 
 [Open the deployed camera app](https://roadlens-ai-five.vercel.app) · [Source](https://github.com/kokoc30/roadlens-ai)
 
-The public frontend currently supports camera/replay analysis and local reports. Remote sharing is disabled until a Render workspace meets the required no-overage condition.
+The public frontend supports camera/replay analysis, local reports and remote sharing through the deployed Render relay. Full cloud pairing is verified: the real paired browser flow passes against the deployed frontend and relay together.
 
 Temporary traffic monitoring with browser inference and an optional local NVIDIA GPU worker. React + TypeScript + Vite retains genuine YOLO26n ONNX Runtime Web fallback. The optional Windows worker runs YOLO26s640 on CUDA and connects outward to the Node/Express/ws relay. The phone remains authoritative for tracking, geometry, rules and reports; the relay only pairs and forwards bounded data.
 

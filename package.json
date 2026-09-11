@@ -35,7 +35,8 @@
     "test:gpu": "playwright test --config tests/gpu/playwright.config.ts",
     "test:start": "node tests/scripts/start-worker.mjs",
     "test:worker": "node scripts/worker-python.mjs -m pytest worker/tests -q",
-    "gpu:benchmark": "node scripts/worker-python.mjs -m worker.runtime.benchmark"
+    "gpu:benchmark": "node scripts/worker-python.mjs -m worker.runtime.benchmark",
+    "measure:production": "node scripts/measure-production.mjs"
   },
   "dependencies": {
     "express": "5.2.1",

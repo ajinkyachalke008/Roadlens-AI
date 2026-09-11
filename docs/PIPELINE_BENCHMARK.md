@@ -99,6 +99,28 @@ camera's 50 ms grid and can settle on either 100 ms or 150 ms spacing. That is a
 artifact of the synthetic 20 FPS capture device, not of the pipeline; a 30 or
 60 FPS camera quantises finer.
 
+### Measured on the real hosted path
+
+The same page against the deployed Vercel frontend and the deployed Render relay,
+with the local RTX 5070 Ti worker connected outbound — no injected latency, the
+actual hosted round trip (`node scripts/measure-production.mjs`):
+
+| Relay build | RTT | Camera | AI Hz | Result age | Overlay age | GPU inference | Worker total | Depth | Superseded | Stale |
+| ----------- | --- | ------ | ----- | ---------- | ----------- | ------------- | ------------ | ----- | ---------- | ----- |
+| before deploy | 51.9 ms | 20.0 | 9.98 | 123 ms | 233 ms | 8.6 ms | 12.6 ms | 1 (downgraded) | 1 | 0 |
+| after deploy | 58.4 ms | 20.0 | 9.51 | 123 ms | 230 ms | 8.9 ms | 12.5 ms | 2 | 0 | 0 |
+
+The first row was taken while the frontend was deployed and the relay was not.
+The client saw three refusals with a frame outstanding and settled permanently at
+depth 1 — the graceful-degradation path, observed in production rather than only
+in a test. After the relay deployed, the same client held depth 2 with no
+refusals and no superseded results.
+
+At ~50 ms hosted RTT the two are equivalent, exactly as the A/B predicts: this
+path is still bounded by the 71.7 ms send floor and the 20 FPS capture grid, not
+by round trip. The depth-2 gain is reserved for the slower paths — cellular, a
+busier relay, a more distant region — where the A/B measured it doubling.
+
 ### Rollout ordering
 
 The relay must be deployed before the frontend. A new relay accepts one or two

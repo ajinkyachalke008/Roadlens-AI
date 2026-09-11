@@ -1,8 +1,15 @@
 # RoadLens demo runbook
 
-## GPU demonstration
+## GPU demonstration — cloud path verified
 
-Current cloud GPU path is blocked by the undeployed Render relay. Once that deployment is authorized and verified:
+The Render relay is deployed and the full cloud path is verified: the real paired
+browser flow passes against the deployed frontend and relay together, and with
+the local worker connected outbound the hosted path measured 49–58 ms round
+trip, 9.5–10.0 analysis Hz, 123 ms result age and 230 ms overlay age, holding
+two bounded frames in flight with zero superseded and zero stale results. Rerun
+that measurement any time with `npm run measure:production`.
+
+The exact demo sequence:
 
 1. Complete .\setup-worker.ps1 once, then configure the actual WSS relay and matching private machine secret in ignored .env.worker.
 2. Run .\start.ps1 on the NVIDIA computer; wait for verified GPU warmup and authenticated relay readiness. Keep this worker running, but stop local development servers.
@@ -14,7 +21,7 @@ For the verified automated local GPU path, run npm run build followed by npm run
 
 Physical GPU checklist: phone on cellular, viewer on a second network; record source dimensions,640/960 analysis encoding, actual submission/resultHz, same-clock age/RTT, worker runtime and measured inference, GPU failure/recovery, permission/background behavior and end cleanup. The phone does not request a microphone, and the worker computer requires no inbound port. All such physical checks remain NOT VERIFIED until executed.
 
-Verified public frontend: https://roadlens-ai-five.vercel.app. See FINAL_HANDOFF.md for release status. Full two-device cloud operation requires an authorized deployed relay; a frontend-only release explicitly disables sharing.
+Verified public frontend: https://roadlens-ai-five.vercel.app, verified relay: https://roadlens-relay.onrender.com. See FINAL_HANDOFF.md for release status. Two-device cloud operation is verified against both; the frontend-only mode, which visibly disables sharing, remains available for deployments without an authorized relay.
 
 ## Local paired demonstration
 
@@ -30,7 +37,22 @@ For repeatable automated evidence, run npm run test:e2e. After npm run build, np
 
 ## Public camera-only demonstration
 
-At the verified frontend URL choose Start camera and grant camera-only permission. Settings also supports a permitted replay, profile choice, demo policy and optional evidence. Show genuine detections and temporary observations below the image. Sharing/Connect remain visibly unavailable until an authorized relay exists. Do not describe this mode as a completed remote-viewing deployment.
+At the verified frontend URL choose Start camera and grant camera-only permission. Settings also supports a permitted replay, profile choice, demo policy and optional evidence. Show genuine detections and temporary observations below the image. This mode needs no relay and no GPU computer, so it is the safe fallback if either is unavailable during a demo.
+
+## Speed validation demonstration
+
+Only meaningful with a mounted, calibrated camera. Calibrate first and confirm
+the status line reads *measured setup* rather than *weak calibration ·
+re-measure*. Open **Validate speed**, pick a vehicle that currently shows a
+valid measured speed, enter the independently measured reference speed and its
+method, and record the trial. The summary shows MAE, median, p95 (suppressed
+below 20 trials), maximum and signed bias; export JSON or CSV before ending the
+session, because End session clears trials with everything else.
+
+Do not present any accuracy figure that the exported summary does not contain,
+and do not describe a trial set as validating accuracy at a site or speed range
+it did not cover. The full procedure and its safety constraints are in
+`docs/SPEED_VALIDATION.md`; no physical field validation has been performed yet.
 
 ## Physical-device checklist — NOT YET EXECUTED
 

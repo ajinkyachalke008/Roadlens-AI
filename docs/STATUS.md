@@ -1,5 +1,50 @@
 # RoadLens release status
 
+## Final intelligence pass — September 11, 2026
+
+Baseline reproduced on clean main `b75faec` before any edit: typecheck, lint,
+169 unit, 49 contract, 61 relay tests, plus the pipeline benchmark re-measured
+against the real RTX 5070 Ti, which reproduced the recorded figures.
+
+The analysis pipeline now carries two bounded frames instead of one, enforced
+identically at camera, relay and worker with no queue anywhere. Matched A/B on
+real CUDA: analysis rate doubles where round trip dominates (5.01 → 10.00 Hz at
+125 ms RTT; 3.34 → 6.67 Hz at 207 ms), overlay age falls about 29%, result age
+unchanged, zero superseded and zero stale results. This also lifts high-latency
+paths above the estimator's 4 Hz sampling gate, which one frame in flight could
+not clear at 207 ms RTT. Ordering is gated at the relay (strictly newer
+identities per epoch, exact frameId correlation) and at the camera (superseded
+and over-age completions discarded before tracking, speed, rules or display).
+Full policy in `docs/LATENCY_POLICY.md`; measurements in
+`docs/PIPELINE_BENCHMARK.md`; decisions and non-decisions in
+`docs/INTELLIGENCE_PASS_DECISIONS.md`.
+
+Added: speed-validation trial recording with MAE, median, p95 (suppressed below
+20 trials), maximum and signed bias, JSON/CSV export, and calibration Valid/Weak
+grading with named reasons. Field speed accuracy remains NOT MEASURED; the
+operator procedure is `docs/SPEED_VALIDATION.md` and its results table is empty.
+
+Final suites on the shipped build: 189 unit, 49 contract, 62 relay integration,
+11 real browser-model, 12 E2E, 10 privacy with a module scan, 1 compiled
+production, 1 split-origin production, 3 deployment schemas, 40 worker tests
+with 68 subtests, and 1 real-GPU browser acceptance. Gitleaks 8.30.1 found no
+secrets in the 170 committable files. The launcher test now falls back to
+Windows PowerShell and reports its CTRL_C_EVENT phase as not exercised there.
+
+**Cloud pairing is now verified.** The real paired browser flow passes against
+the deployed Vercel frontend and the deployed Render relay together. With the
+local worker connected outbound to the production relay, the hosted path
+measured 49–58 ms RTT, 9.5–10.0 analysis Hz, 123 ms result age, 230 ms overlay
+age, 8.9 ms GPU inference, depth 2 held, zero superseded and zero stale. The
+graceful-degradation path was also observed in production: while the frontend
+was deployed ahead of the relay, the client detected the refusals and settled at
+depth 1 rather than thrashing.
+
+Still unverified: physical iPhone behaviour after these changes, field speed
+accuracy, and detection quality metrics (no licensed traffic evaluation set).
+Plate OCR and wrong-way remain disabled; no training ran.
+
+
 ## GPU upgrade — active September 11, 2026
 
 The latest explicit user request supersedes the old browser-only/local-worker prohibition: add an optional outbound local Windows NVIDIA detector, preserve WASM fallback and all RAM-only pairing/report semantics. Initial Git main was clean at5917cb24d8c6540ce8f4649dafd8b46a55968e64. No preexisting changes were overwritten.

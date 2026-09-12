@@ -1,5 +1,48 @@
 # RoadLens release status
 
+## Vehicle intelligence and tracking pass — September 11, 2026
+
+Baseline reproduced on clean main `948e13a` before any edit: typecheck, lint,
+223 unit and 85 contract tests green.
+
+**The reported ID fragmentation was a tracker defect, not a detector one.**
+Instrumenting `time_aware_iou_v1` showed that 21 of the 29 avoidable new
+identities across the evaluation set came from its hard class gate severing a
+track whenever the detector flipped an SUV between `car` and `truck`. A
+single-variable sweep confirms it: dropout, box jitter, analysis cadence and
+object size each caused zero identity switches on a clean traversal, while class
+instability caused all of them.
+
+`time_aware_iou_v2` ships. Over 23 scenarios it takes identity switches from 50
+to 0 on the correctness tier and 73 to 3 on the adversarial tier, with distinct
+IDs per vehicle falling 2.01 to 1.00 and 2.29 to 1.11, false merges 5 to 3, IDF1
+0.897 to 0.938 and MOTA 0.821 to 0.899. It matches a reference ByteTrack on
+identity switches and beats a reference BoT-SORT on every metric. Evidence,
+tuning sweeps and two rejected approaches are in `docs/TRACKING_EVALUATION.md`.
+
+Added product layer: tap-to-select with a Selected Vehicle card (class, stable
+ID, detection confidence, tracking state, observed duration, frame-relative
+motion, speed or the reason there is none, plate), operator-triggered plate
+reading for the selected vehicle with a plate-localisation marker, an explicit
+handheld/mounted mode badge, and identity copy unified as `CAR · ID 12` across
+overlay, card and reports.
+
+**Handheld absolute speed is DISABLED and not prototyped.** A moving monocular
+camera mixes its own motion into the measurement and would produce plausible,
+smoothly-varying, wrong mph that passes every existing validity gate. Handheld
+mode reports direction, never a rate. Research and the conditions that would
+change this: `docs/HANDHELD_SPEED_RESEARCH.md`.
+
+**The detector is unchanged: YOLO26s at 640.** Measured on the RTX 5070 Ti, the
+three available models span 1.6 ms of inference and 1.4 ms of worker total, which
+is not observable against a network-dominated end-to-end budget. Relative recall
+between them is **unmeasured** and no recall table is published, because the only
+licensed fixture is a single photograph. `docs/DETECTOR_AUDIT.md`.
+
+Suites on the shipped build: 243 unit, 85 contract, 42 tracking, 13 E2E
+(including 10 privacy), 95 worker tests with 139 subtests. Physical validation
+is **NOT VERIFIED** and the procedure is `docs/PHYSICAL_VALIDATION.md`.
+
 ## Final intelligence pass — September 11, 2026
 
 Baseline reproduced on clean main `b75faec` before any edit: typecheck, lint,

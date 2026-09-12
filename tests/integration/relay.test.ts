@@ -3,7 +3,7 @@ import { randomUUID } from "node:crypto";
 import { spawn, type ChildProcess } from "node:child_process";
 import { WebSocket, type RawData } from "ws";
 import { createRelay, type RelayConfig } from "../../backend/src/relay.js";
-import { encodePacket } from "../../shared/src/packets.js";
+import { decodePacket, encodePacket } from "../../shared/src/packets.js";
 import { emptyCounts, type FrameResult } from "../../shared/src/schemas.js";
 import { report as syntheticReport, markerJpeg } from "../contracts/fixtures";
 
@@ -133,7 +133,11 @@ async function fixture(options: Partial<RelayConfig> = {}) {
   };
 }
 // Minimal JPEG markers deliberately exercise framing only; actual image/model E2E is separate.
-function packet(seq = 1, epoch = "b6ac502f-4554-4b57-8802-1b5e98db4678") {
+function packet(
+  seq = 1,
+  epoch = "b6ac502f-4554-4b57-8802-1b5e98db4678",
+  extra: Partial<FrameResult> = {},
+) {
   const frameId = `${epoch}:${seq}`;
   const result: FrameResult = {
     v: 2,
@@ -157,6 +161,7 @@ function packet(seq = 1, epoch = "b6ac502f-4554-4b57-8802-1b5e98db4678") {
     analysisHz: 1,
     tracks: [],
     stats: { counts: emptyCounts(), validSpeedCount: 0, averageSpeedMps: null },
+    ...extra,
   };
   return encodePacket(
     {
@@ -1118,3 +1123,58 @@ it("B45 actual child-process restart invalidates prior room capability and code"
   });
   await eventually(() => old.ended);
 }, 20_000);
+
+/**
+ * Analysis-frame header negotiation.
+ *
+ * `FrameSchema` is strict and a header this relay cannot parse disconnects the
+ * camera, so the fields added by the vehicle-intelligence pass have to be
+ * negotiated rather than assumed. The relay advertises what it accepts; the
+ * camera omits the new fields when nothing was advertised.
+ */
+describe("Release: analysis-frame protocol negotiation", () => {
+  it("advertises the frame protocol it validates", async () => {
+    const f = await fixture();
+    const room = await f.create();
+    const owner = await f.connect();
+    const ok = await owner.hello(room.roomId, room.ownerToken);
+    expect(ok.frameProtocol).toBe(2);
+  });
+
+  it("relays a frame carrying the new mode and selection fields", async () => {
+    const f = await fixture();
+    const { owner, client } = await f.pair();
+    owner.socket.send(
+      packet(1, "b6ac502f-4554-4b57-8802-1b5e98db4678", {
+        mode: {
+          operating: "mounted",
+          speedActive: true,
+          reason: "speed_active",
+        },
+        selectedTrackId: 12,
+      }),
+    );
+    await eventually(() => client.binaries.length > 0);
+    const { header } = decodePacket(client.binaries[0]!);
+    if (header.type !== "analysis.frame") throw new Error("wrong packet");
+    expect(header.result.mode).toEqual({
+      operating: "mounted",
+      speedActive: true,
+      reason: "speed_active",
+    });
+    expect(header.result.selectedTrackId).toBe(12);
+    expect(owner.ended).toBe(false);
+  });
+
+  it("still accepts a frame from a camera that omits them", async () => {
+    const f = await fixture();
+    const { owner, client } = await f.pair();
+    owner.socket.send(packet(1));
+    await eventually(() => client.binaries.length > 0);
+    const { header } = decodePacket(client.binaries[0]!);
+    if (header.type !== "analysis.frame") throw new Error("wrong packet");
+    expect(header.result.mode).toBeUndefined();
+    expect(header.result.selectedTrackId).toBeUndefined();
+    expect(owner.ended).toBe(false);
+  });
+});

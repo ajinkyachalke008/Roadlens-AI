@@ -1632,3 +1632,62 @@ test("B-smooth live preview is decoupled from analysis and overlays the video ex
     await browser.close();
   }
 });
+
+test("Vehicle intelligence: tapping a vehicle opens its detail, and handheld speed stays unavailable", async ({
+  browser,
+}) => {
+  const camera = await pageFor(browser);
+  try {
+    await startReplay(camera.page);
+    // Handheld is the default state, and it must say so rather than implying a
+    // measurement is merely still loading.
+    const mode = camera.page.getByTestId("mode-state");
+    await expect(mode).toHaveText(/Handheld · speed unavailable/);
+    await expect(mode).toHaveAttribute("data-speed-active", "false");
+
+    // No vehicle is selected until the operator taps one.
+    await expect(camera.page.getByLabel("Selected vehicle")).toHaveCount(0);
+
+    const frame = camera.page.getByTestId("analyzed-frame");
+    const box = await frame.boundingBox();
+    if (!box) throw new Error("Analyzed frame has no layout box");
+    // The permitted replay still is the bus photo: the vehicle occupies the
+    // middle of the frame, so the centre tap lands on it.
+    await frame.click({
+      position: { x: box.width / 2, y: box.height / 2 },
+    });
+
+    const card = camera.page.getByLabel("Selected vehicle");
+    await expect(card).toBeVisible();
+    await expect(camera.page.getByTestId("selected-title")).toHaveText(
+      /^(BUS|CAR|TRUCK|PERSON) · ID \d+$/,
+    );
+    await expect(camera.page.getByTestId("selected-confidence")).toHaveText(
+      /^\d{1,3}%$/,
+    );
+    await expect(camera.page.getByTestId("selected-state")).toHaveText(
+      /tentative|confirmed|lost/,
+    );
+    await expect(camera.page.getByTestId("selected-observed")).toHaveText(
+      /^\d+\.\d s$/,
+    );
+
+    // The rule this release exists to enforce: a handheld camera reports no
+    // road speed at all, and says why instead of showing a number.
+    const speed = camera.page.getByTestId("selected-speed");
+    await expect(speed).toHaveText(/Mount and calibrate for speed/);
+    await expect(speed).not.toHaveText(/mph|km\/h/);
+
+    // Plate reading is offered, and is honest that it needs the GPU pipeline.
+    await expect(camera.page.getByTestId("selected-plate")).toHaveText(
+      "Not analyzed",
+    );
+    await expect(camera.page.getByTestId("analyze-plate")).toBeDisabled();
+
+    // Tapping empty space clears the selection rather than sticking to a car.
+    await frame.click({ position: { x: 2, y: 2 } });
+    await expect(camera.page.getByLabel("Selected vehicle")).toHaveCount(0);
+  } finally {
+    await camera.context.close();
+  }
+});

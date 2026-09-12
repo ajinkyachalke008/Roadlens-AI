@@ -26,20 +26,50 @@ export interface OverlayTelemetry {
   extrapolatedMs: number;
 }
 const colorFor = (ruleState: string) =>
-  ruleState === "candidate" ? "#ffbf69" : "#a3edb8";
+  ruleState === "candidate"
+    ? "#ffbf69"
+    : ruleState === "above_limit"
+      ? "#ffd89b"
+      : "#a3edb8";
+
+/**
+ * Overlay label.
+ *
+ * `CAR · ID 12` rather than `car #12`: a hash in front of a number reads as a
+ * quantity, and operators reported exactly that confusion. Speed joins the
+ * label only when the frame says the measurement is valid, so a handheld
+ * session shows identity and nothing that could be mistaken for a road speed.
+ */
+export const overlayLabel = (
+  className: string,
+  trackId: number,
+  speedMps: number | null,
+  speedUnit: SpeedUnit,
+  overBy: number | null = null,
+) =>
+  `${className.toUpperCase()} · ID ${trackId}` +
+  (speedMps !== null ? ` · ${displaySpeed(speedMps, speedUnit)}` : "") +
+  (speedMps !== null && overBy !== null && overBy > 0
+    ? ` · +${displaySpeed(overBy, speedUnit)}`
+    : "");
+
+export interface OverlayDrawBox {
+  bbox: readonly [number, number, number, number];
+  className: string;
+  trackId: number;
+  speedMps: number | null;
+  ruleState: string;
+  opacity?: number;
+}
 
 function drawBoxes(
   ctx: CanvasRenderingContext2D,
   rect: ContentRect,
-  boxes: {
-    bbox: readonly [number, number, number, number];
-    className: string;
-    trackId: number;
-    speedMps: number | null;
-    ruleState: string;
-    opacity?: number;
-  }[],
+  boxes: OverlayDrawBox[],
   speedUnit: SpeedUnit,
+  selectedTrackId: number | null = null,
+  plateBox: readonly [number, number, number, number] | null = null,
+  overBy: (box: OverlayDrawBox) => number | null = () => null,
 ) {
   ctx.save();
   // Detections belong to the video content, never to the letterbox bars.
@@ -51,13 +81,20 @@ function drawBoxes(
   ctx.textBaseline = "alphabetic";
   for (const box of boxes) {
     const { x, y, width, height } = toContent(box.bbox, rect);
-    const color = colorFor(box.ruleState);
+    const selected = box.trackId === selectedTrackId;
+    const color = selected ? "#8ecbff" : colorFor(box.ruleState);
     ctx.globalAlpha = box.opacity ?? 1;
     ctx.strokeStyle = color;
+    ctx.lineWidth = Math.max(selected ? 3 : 1.5, rect.width / 450);
     ctx.strokeRect(x, y, width, height);
-    const label = `${box.className} #${box.trackId}${
-      box.speedMps !== null ? " · " + displaySpeed(box.speedMps, speedUnit) : ""
-    }`;
+    ctx.lineWidth = Math.max(1.5, rect.width / 450);
+    const label = overlayLabel(
+      box.className,
+      box.trackId,
+      box.speedMps,
+      speedUnit,
+      overBy(box),
+    );
     const labelHeight = Math.max(20, rect.width / 40);
     const textWidth = ctx.measureText(label).width + 12;
     const top = Math.max(rect.y, y - labelHeight);
@@ -70,8 +107,39 @@ function drawBoxes(
     );
     ctx.fillStyle = "#0e1812";
     ctx.fillText(label, x + 5, top + labelHeight * 0.74);
+    // Plate localisation, for the selected vehicle only. A small inner marker
+    // showing where the reader looked - never the plate text itself, which
+    // belongs to the selected card and to reports.
+    if (selected && plateBox) {
+      const plate = toContent(plateBox, rect);
+      ctx.save();
+      ctx.setLineDash([4, 3]);
+      ctx.strokeStyle = "#ffffff";
+      ctx.globalAlpha = (box.opacity ?? 1) * 0.85;
+      ctx.strokeRect(plate.x, plate.y, plate.width, plate.height);
+      ctx.restore();
+    }
   }
   ctx.restore();
+}
+
+/**
+ * Which track a tap landed on, in normalised source coordinates. The smallest
+ * containing box wins, so tapping a car inside a bus selects the car.
+ */
+export function hitTest(
+  boxes: readonly OverlayDrawBox[],
+  point: readonly [number, number],
+): number | null {
+  let best: { trackId: number; area: number } | null = null;
+  for (const box of boxes) {
+    const [x0, y0, x1, y1] = box.bbox;
+    if (point[0] < x0 || point[0] > x1 || point[1] < y0 || point[1] > y1)
+      continue;
+    const area = (x1 - x0) * (y1 - y0);
+    if (!best || area < best.area) best = { trackId: box.trackId, area };
+  }
+  return best?.trackId ?? null;
 }
 export function Stage({
   frame,
@@ -81,6 +149,10 @@ export function Stage({
   sourceTimeNow,
   smoothing = true,
   telemetry,
+  selectedTrackId = null,
+  onSelect,
+  plateBox = null,
+  speedLimitMps = null,
 }: {
   frame: DisplayFrame | null;
   status: string;
@@ -90,11 +162,25 @@ export function Stage({
   sourceTimeNow?: () => number;
   smoothing?: boolean;
   telemetry?: RefObject<OverlayTelemetry>;
+  selectedTrackId?: number | null;
+  /** Tapping a box selects that vehicle; tapping empty space clears. */
+  onSelect?: (trackId: number | null) => void;
+  plateBox?: readonly [number, number, number, number] | null;
+  speedLimitMps?: number | null;
 }) {
   const canvas = useRef<HTMLCanvasElement>(null);
   const view = useRef<HTMLDivElement>(null);
   const model = useRef(new OverlayModel()).current;
   const live = !!videoRef;
+  // The render loop reads these without being restarted by a selection change.
+  const selection = useRef(selectedTrackId);
+  selection.current = selectedTrackId;
+  const plate = useRef(plateBox);
+  plate.current = plateBox;
+  const limit = useRef(speedLimitMps);
+  limit.current = speedLimitMps;
+  const drawn = useRef<OverlayDrawBox[]>([]);
+  const contentRef = useRef<ContentRect | null>(null);
   // Analysed results reach the render loop without re-rendering the page.
   useEffect(() => {
     if (!live) return;
@@ -157,7 +243,20 @@ export function Stage({
       const state = smoothing
         ? model.stateAt(sourceNow)
         : model.stateAt(source.sourceTimeMs);
-      drawBoxes(ctx, rect, state.boxes, speedUnit);
+      drawn.current = state.boxes;
+      contentRef.current = rect;
+      drawBoxes(
+        ctx,
+        rect,
+        state.boxes,
+        speedUnit,
+        selection.current,
+        plate.current,
+        (box) =>
+          box.speedMps !== null && limit.current !== null
+            ? box.speedMps - limit.current
+            : null,
+      );
       if (telemetry?.current)
         Object.assign(telemetry.current, {
           ageMs: state.ageMs,
@@ -187,6 +286,7 @@ export function Stage({
       { x: 0, y: 0, width: c.width, height: c.height },
       frame.result.tracks.filter((t) => t.observed),
       speedUnit,
+      frame.result.selectedTrackId ?? null,
     );
   }, [frame, speedUnit, live]);
   return (
@@ -214,6 +314,27 @@ export function Stage({
           <canvas
             ref={canvas}
             className={live ? "stage-overlay" : undefined}
+            onClick={
+              onSelect
+                ? (event) => {
+                    const rect = contentRef.current;
+                    const element = event.currentTarget;
+                    if (!rect || !rect.width || !rect.height) return;
+                    const bounds = element.getBoundingClientRect();
+                    // The canvas is laid out in CSS pixels and the content
+                    // rectangle is measured in the same units, so the tap maps
+                    // straight back to normalised source coordinates.
+                    const x =
+                      (event.clientX - bounds.left - rect.x) / rect.width;
+                    const y = (event.clientY - bounds.top - rect.y) / rect.height;
+                    onSelect(
+                      x < 0 || x > 1 || y < 0 || y > 1
+                        ? null
+                        : hitTest(drawn.current, [x, y]),
+                    );
+                  }
+                : undefined
+            }
             data-testid="analyzed-frame"
             data-frame-id={frame.result.frameId}
             data-provider={frame.result.executionProvider}

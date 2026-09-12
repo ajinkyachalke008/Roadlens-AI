@@ -30,6 +30,19 @@ export const DetectionSchema = z
     bbox: BboxSchema,
   })
   .strict();
+/**
+ * Frame-relative motion. It mixes vehicle motion with camera motion and is
+ * therefore a direction, never a rate: nothing derived from it is ever
+ * presented as a road speed.
+ */
+export const MotionSchema = z.enum([
+  "approaching",
+  "receding",
+  "left",
+  "right",
+  "stationary",
+  "unknown",
+]);
 export const TrackSchema = DetectionSchema.extend({
   trackId: seq,
   observed: z.boolean(),
@@ -37,6 +50,15 @@ export const TrackSchema = DetectionSchema.extend({
   speedStatus: z.enum(["valid_estimate", "unavailable"]),
   speedReason: short.nullable(),
   ruleState: z.enum(["unmeasured", "normal", "above_limit", "candidate"]),
+  /**
+   * Added after the tracking pass. Optional as well as present, so a viewer
+   * still running a previously cached build keeps parsing frames instead of
+   * rejecting the whole session.
+   */
+  motion: MotionSchema.optional(),
+  trackState: z.enum(["tentative", "confirmed", "lost"]).optional(),
+  /** Source-time span over which this identity has been observed. */
+  observedMs: nonnegative.optional(),
 }).refine((t) =>
   t.speedStatus === "valid_estimate"
     ? t.observed && t.speedMps !== null && t.speedReason === null
@@ -85,6 +107,24 @@ export const FrameSchema = z
     inferenceMs: nonnegative,
     analysisHz: nonnegative.max(1000),
     tracks: z.array(TrackSchema).max(LIMITS.tracks),
+    /**
+     * Which operating mode produced this frame. Speed exists only in mounted
+     * mode with a valid calibration and a verified stationary background; in
+     * every other state `speedActive` is false and the reason says why.
+     */
+    mode: z
+      .object({
+        operating: z.enum(["handheld", "mounted"]),
+        speedActive: z.boolean(),
+        reason: short,
+      })
+      .strict()
+      .optional(),
+    /**
+     * The vehicle the operator has selected, so a viewer can highlight the same
+     * one. Only the identity travels: plate text never rides on a live frame.
+     */
+    selectedTrackId: seq.nullable().optional(),
     stats: z
       .object({
         counts: CountsSchema,

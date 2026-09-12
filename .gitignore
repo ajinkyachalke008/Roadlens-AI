@@ -64,6 +64,10 @@ docs/*
 !docs/PLATE_VALIDATION.md
 !docs/PLATE_DATASETS.md
 !docs/PLATE_RESULTS.md
+!docs/TRACKING_EVALUATION.md
+!docs/DETECTOR_AUDIT.md
+!docs/HANDHELD_SPEED_RESEARCH.md
+!docs/PHYSICAL_VALIDATION.md
 # Generated local measurements/screenshots are not corresponding source.
 tests/model/browser-results.json
 training/data/

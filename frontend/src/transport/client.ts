@@ -172,6 +172,12 @@ export class RelayClient {
   onState = (_state: string) => {};
   viewerCount = 0;
   connected = false;
+  /**
+   * Analysis-frame header revision the connected relay accepts. A relay that
+   * does not advertise one predates the vehicle-intelligence fields, and its
+   * strict schema would reject - and so disconnect - a camera that sent them.
+   */
+  frameProtocol = 1;
   constructor(
     private roomId: string,
     private role: "camera" | "viewer",
@@ -227,6 +233,10 @@ export class RelayClient {
           }
           this.connected = true;
           this.attempts = 0;
+          this.frameProtocol =
+            Number.isInteger(m.frameProtocol) && Number(m.frameProtocol) >= 1
+              ? Number(m.frameProtocol)
+              : 1;
           this.viewerCount = Number(m.viewerCount) || 0;
           this.onState("Connected");
           if (this.role === "viewer")

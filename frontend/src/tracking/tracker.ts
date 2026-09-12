@@ -1,4 +1,8 @@
 import { LIMITS } from "../../../shared/src/limits";
+import type {
+  DiagnosticSink,
+  RejectionReason,
+} from "./diagnostics";
 export const TRACKER_VERSION = "time_aware_iou_v1";
 export type Box = [number, number, number, number];
 export type ClassName =
@@ -95,6 +99,12 @@ export class TimeAwareTracker {
   private epoch = "";
   private previousTime = -Infinity;
   private nextId = 1;
+  /**
+   * Opt-in instrumentation. Left null in production, so no diagnostic value is
+   * ever computed on the camera path; the evaluation harness attaches a sink to
+   * explain every refused association and every new identity.
+   */
+  diagnostics: DiagnosticSink | null = null;
   reset(): void {
     this.tracks = [];
     this.epoch = "";
@@ -119,10 +129,18 @@ export class TimeAwareTracker {
     if (!Number.isFinite(sourceTimeMs) || sourceTimeMs < 0)
       throw new Error("time_discontinuity");
     if (captureEpoch !== this.epoch) {
+      const sink = this.diagnostics;
       this.reset();
+      this.diagnostics = sink;
+      sink?.({ kind: "reset", sourceTimeMs, reason: "epoch_changed" });
       this.epoch = captureEpoch;
     }
     if (sourceTimeMs <= this.previousTime) {
+      this.diagnostics?.({
+        kind: "reset",
+        sourceTimeMs,
+        reason: "time_not_advancing",
+      });
       this.tracks = [];
       this.previousTime = sourceTimeMs;
       return [];
@@ -145,6 +163,11 @@ export class TimeAwareTracker {
     this.tracks = this.tracks.filter((t) => sourceTimeMs - t.lastSeen <= 1500);
     for (const t of this.tracks) t.observed = false;
     const matched = new Set<number>();
+    /** Best refused candidate per detection, for new-track diagnostics only. */
+    const nearest = new Map<
+      number,
+      { rejection: RejectionReason; iou: number; relative: number }
+    >();
     const associate = (tracks: InternalTrack[], indices: number[]) => {
       const costs = tracks.map((t) =>
         indices.map((index) => {
@@ -157,18 +180,53 @@ export class TimeAwareTracker {
             b = center(d.bbox),
             previous = center(t.bbox),
             overlap = iou(predicted, d.bbox);
-          if (
-            Math.hypot(previous[0]! - b[0]!, previous[1]! - b[1]!) >
-            Math.max(0.1, dt * 1.5)
-          )
-            return 1e6;
-          if (
-            t.className !== d.className ||
-            overlap < 0.15 ||
-            Math.hypot(a[0]! - b[0]!, a[1]! - b[1]!) > 0.25
-          )
-            return 1e6;
-          return 1 - overlap;
+          const motion = Math.hypot(
+            previous[0]! - b[0]!,
+            previous[1]! - b[1]!,
+          );
+          const predictedDistance = Math.hypot(a[0]! - b[0]!, a[1]! - b[1]!);
+          const rejection: RejectionReason | null =
+            motion > Math.max(0.1, dt * 1.5)
+              ? "motion_gate"
+              : t.className !== d.className
+                ? "class_mismatch"
+                : overlap < 0.15
+                  ? "iou_below_gate"
+                  : predictedDistance > 0.25
+                    ? "predicted_center_far"
+                    : null;
+          if (this.diagnostics) {
+            const diagonal = Math.hypot(
+              t.bbox[2]! - t.bbox[0]!,
+              t.bbox[3]! - t.bbox[1]!,
+            );
+            const relative = motion / Math.max(1e-6, diagonal);
+            this.diagnostics({
+              kind: "association",
+              sourceTimeMs,
+              trackId: t.trackId,
+              trackClass: t.className,
+              detectionClass: d.className,
+              previousBox: [...t.bbox],
+              predictedBox: [...predicted],
+              candidateBox: [...d.bbox],
+              iou: overlap,
+              centerDistance: motion,
+              relativeDistance: relative,
+              timeGapMs: sourceTimeMs - t.lastSeen,
+              score: d.score,
+              cost: rejection ? 1e6 : 1 - overlap,
+              accepted: false,
+              rejection,
+              trackState: t.state,
+            });
+            if (rejection) {
+              const best = nearest.get(index);
+              if (!best || overlap > best.iou)
+                nearest.set(index, { rejection, iou: overlap, relative });
+            }
+          }
+          return rejection ? 1e6 : 1 - overlap;
         }),
       );
       hungarian(costs).forEach((col, row) => {
@@ -242,6 +300,21 @@ export class TimeAwareTracker {
         }
         if (oldestLost < 0) continue;
         this.tracks.splice(oldestLost, 1);
+      }
+      if (this.diagnostics) {
+        const best = nearest.get(i);
+        this.diagnostics({
+          kind: "new_track",
+          sourceTimeMs,
+          trackId: this.nextId,
+          className: d.className,
+          bbox: [...d.bbox],
+          score: d.score,
+          reason: this.tracks.length ? "all_candidates_gated" : "no_candidate_track",
+          nearestRejection: best?.rejection ?? null,
+          nearestIou: best?.iou ?? 0,
+          nearestRelativeDistance: best?.relative ?? 0,
+        });
       }
       this.tracks.push({
         ...d,

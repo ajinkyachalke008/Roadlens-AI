@@ -143,8 +143,8 @@ export function Reports({
                   </strong>
                   <small>
                     {r.sourceMode === "replay_video" ? "Replay · " : ""}
-                    {r.className ?? "Scene"}{" "}
-                    {r.trackId !== null ? "#" + r.trackId : ""}
+                    {(r.className ?? "Scene").toUpperCase()}
+                    {r.trackId !== null ? ` · ID ${r.trackId}` : ""}
                     {/* The row is a fixed grid, so the plate rides along with
                         the object line rather than claiming a column of its
                         own; the full reading and its confidence are in the
@@ -209,16 +209,40 @@ export function Reports({
             <dd>
               {report.sourceMode === "replay_video" ? "Replay" : "Live camera"}
             </dd>
-            <dt>Object</dt>
-            <dd>
-              {report.className ?? "Scene"} · #{report.trackId ?? "—"}
+            <dt>Vehicle</dt>
+            <dd data-testid="report-vehicle">
+              {/* Same identity form as the overlay and the selected card, so one
+                  vehicle reads the same everywhere. */}
+              {(report.className ?? "Scene").toUpperCase()}
+              {report.trackId !== null ? ` · ID ${report.trackId}` : ""}
             </dd>
-            <dt>Estimated speed</dt>
-            <dd>
-              {report.speedMps === null
-                ? "—"
-                : displaySpeed(report.speedMps, speedUnit)}
+            <dt>Measured speed</dt>
+            <dd data-testid="report-speed">
+              {report.speedMps === null ? (
+                <>
+                  —{" "}
+                  <small>
+                    {report.validityReasons.includes("handheld") ||
+                    report.calibrationVersion === null
+                      ? "Mounted calibration required"
+                      : "No qualified measurement"}
+                  </small>
+                </>
+              ) : (
+                displaySpeed(report.speedMps, speedUnit)
+              )}
             </dd>
+            {report.speedMps !== null &&
+              report.policy.speedLimitMps !== null && (
+                <>
+                  <dt>Over the limit</dt>
+                  <dd data-testid="report-over">
+                    {report.speedMps > report.policy.speedLimitMps
+                      ? `+${displaySpeed(report.speedMps - report.policy.speedLimitMps, speedUnit)}`
+                      : "Within the entered limit"}
+                  </dd>
+                </>
+              )}
             {plateLabel(report) !== null && (
               <>
                 <dt>Plate</dt>

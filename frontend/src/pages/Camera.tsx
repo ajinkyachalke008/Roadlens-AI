@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import {
   CameraCapture,
+  newPolicy,
   STALLED_STATUS,
   type CompletedFrame,
 } from "../camera/capture";
@@ -37,6 +38,7 @@ import { speedFactor, type SpeedUnit } from "../components/speedUnits";
 import { RemoteDetector } from "../inference/remote";
 import { PlateCapture, type PlateCaptureMode } from "../plates/capture";
 import { plateFields } from "../plates/report";
+import { SelectedVehicle } from "../components/SelectedVehicle";
 export default function Camera() {
   const video = useRef<HTMLVideoElement>(null);
   const capture = useRef<CameraCapture | null>(null);
@@ -64,6 +66,12 @@ export default function Camera() {
   const plates = useRef(new PlateCapture()).current;
   const [plateMode, setPlateMode] = useState<PlateCaptureMode>("candidates");
   const [plateRevision, setPlateRevision] = useState(0);
+  /**
+   * The vehicle the operator tapped. Held in React state for the card and
+   * mirrored onto the capture controller, which stamps it into each frame so a
+   * viewer can highlight the same box.
+   */
+  const [selectedTrackId, setSelectedTrackId] = useState<number | null>(null);
   /** Reports whose plate consensus is still being followed, by track. */
   const plateReports = useRef(new Map<number, string>()).current;
   const [validationRevision, setValidationRevision] = useState(0);
@@ -266,6 +274,10 @@ export default function Camera() {
       setFrame(null);
       plates.reset();
       plateReports.clear();
+      // Track identities do not survive an epoch, so a selection made in the
+      // previous one cannot mean anything in this one.
+      setSelectedTrackId(null);
+      c.selectedTrackId = null;
       setCalibrationStatus("Source changed · measurement reset");
       setDrawer((current) => (current === "calibration" ? null : current));
       lastCameraStatus.current = "";
@@ -345,12 +357,22 @@ export default function Camera() {
         lastPreview.current = now;
         void completed.jpeg.arrayBuffer().then((buffer) => {
           if (client !== relay.current || c.latest !== completed) return;
+          // A relay deployed before the vehicle-intelligence fields validates
+          // the header with a strict schema and disconnects the camera when it
+          // sees one it does not know, so those fields are dropped rather than
+          // risking the session. The viewer simply loses mode and selection.
+          const {
+            mode: _mode,
+            selectedTrackId: _selectedTrackId,
+            ...legacy
+          } = completed.result;
           const sent = client.sendPacket(
             {
               v: 2,
               type: "analysis.frame",
               frameId: completed.result.frameId,
-              result: completed.result,
+              result:
+                client.frameProtocol >= 2 ? completed.result : legacy,
               imageWidth: completed.jpegWidth,
               imageHeight: completed.jpegHeight,
               imageLength: buffer.byteLength,
@@ -674,6 +696,33 @@ export default function Camera() {
       : "Shared · code ready"
     : "Share · off";
   const loading = status.startsWith("Loading") || status === "Preparing camera";
+  /**
+   * Operating mode, read from the analysed frame when there is one so the badge
+   * describes the state that actually produced what is on screen.
+   */
+  const mode = frame?.result.mode ??
+    capture.current?.operatingMode ?? {
+      operating: "handheld" as const,
+      speedActive: false,
+      reason: "handheld",
+    };
+  const modeLabel = mode.speedActive
+    ? "Mounted · speed active"
+    : mode.operating === "mounted"
+      ? "Mounted · speed unavailable"
+      : "Handheld · speed unavailable";
+  const selectedTrack =
+    frame?.result.tracks.find(
+      (t) => t.trackId === selectedTrackId && t.observed,
+    ) ?? null;
+  // `plateRevision` is read so a settled consensus re-renders this card.
+  void plateRevision;
+  const selectedPlate =
+    selectedTrackId === null ? null : plates.state(selectedTrackId);
+  const select = (trackId: number | null) => {
+    setSelectedTrackId(trackId);
+    if (capture.current) capture.current.selectedTrackId = trackId;
+  };
   return (
     <>
       <div className="page-heading">
@@ -691,6 +740,18 @@ export default function Camera() {
           <span className="badge" data-testid="share-state">
             {shareState}
           </span>
+          <span
+            className="badge"
+            data-testid="mode-state"
+            data-speed-active={mode.speedActive ? "true" : "false"}
+            title={
+              mode.speedActive
+                ? "Calibrated and stationary: speed is measured."
+                : "Absolute speed needs a mounted, calibrated, stationary camera."
+            }
+          >
+            {modeLabel}
+          </span>
         </div>
       </div>
       <Stage
@@ -701,6 +762,26 @@ export default function Camera() {
         sourceTimeNow={sourceTimeNow}
         smoothing={smoothing}
         telemetry={overlay}
+        selectedTrackId={selectedTrackId}
+        onSelect={select}
+        plateBox={selectedPlate?.plateBox ?? null}
+        speedLimitMps={capture.current?.policy.speedLimitMps ?? null}
+      />
+      <SelectedVehicle
+        track={selectedTrack}
+        lost={selectedTrackId !== null && !selectedTrack}
+        plate={selectedPlate}
+        plateAvailable={!!capture.current?.remote?.plateAvailable}
+        mode={mode}
+        policy={capture.current?.policy ?? newPolicy()}
+        speedUnit={speedUnit}
+        onAnalyzePlate={() => {
+          if (selectedTrackId === null) return;
+          if (!plates.request(selectedTrackId))
+            setError("Too many vehicles queued for plate reading.");
+          setPlateRevision((value) => value + 1);
+        }}
+        onClear={() => select(null)}
       />
       <div className="controls">
         <div className="actions">
@@ -923,10 +1004,14 @@ export default function Camera() {
                 setAnalysisEdge(Number(e.target.value) as 640 | 960)
               }
             >
-              <option value="640">640 · lower bandwidth</option>
-              <option value="960">960 · more detail</option>
+              <option value="640">640 · matches the model input</option>
+              <option value="960">960 · sharper source, same 640 input</option>
             </select>
           </label>
+          <p className="footnote">
+            The GPU model runs at 640 either way; 960 only sends a less
+            compressed source for it to letterbox, at roughly double the bytes.
+          </p>
           <label className="check">
             <input
               type="checkbox"

@@ -33,6 +33,12 @@ export interface PlateTrackState {
   supportingFrames: number;
   detectorConfidence: number | null;
   submitted: number;
+  /**
+   * Where the plate detector last found a plate, in frame-normalised
+   * coordinates. Display feedback for the selected vehicle only: it shows the
+   * operator that the system is looking at the right rectangle.
+   */
+  plateBox: readonly [number, number, number, number] | null;
 }
 interface Candidate {
   quality: number;
@@ -48,6 +54,8 @@ interface TrackRecord {
   submitted: number;
   inFlight: boolean;
   requested: boolean;
+  /** Last successful localisation, already mapped into frame coordinates. */
+  plateBox: readonly [number, number, number, number] | null;
 }
 const VEHICLES = new Set(["car", "motorcycle", "bus", "truck"]);
 /** Vehicle boxes are tight; a plate sits at the very edge of one. */
@@ -115,6 +123,7 @@ export class PlateCapture {
         supportingFrames: 0,
         detectorConfidence: null,
         submitted: record?.submitted ?? 0,
+        plateBox: null,
       };
     if (!record || (!record.submitted && !record.inFlight))
       return {
@@ -124,6 +133,7 @@ export class PlateCapture {
         supportingFrames: 0,
         detectorConfidence: null,
         submitted: 0,
+        plateBox: null,
       };
     const consensus = plateConsensus(record.observations);
     // A track that has not yet spent its frame budget, or still has work in
@@ -143,6 +153,7 @@ export class PlateCapture {
       supportingFrames: consensus.supportingFrames,
       detectorConfidence: consensus.detectorConfidence,
       submitted: record.submitted,
+      plateBox: record.plateBox,
     };
   }
 
@@ -238,6 +249,7 @@ export class PlateCapture {
           submitted: 0,
           inFlight: false,
           requested: false,
+          plateBox: null,
         };
         this.tracks.set(track.trackId, record);
       }
@@ -325,6 +337,17 @@ export class PlateCapture {
         detectorConfidence: result.detectorConfidence,
         quality: candidate.quality,
       });
+      // The worker reports the plate box inside the crop it was sent. Mapping it
+      // back through that crop is the only way it means anything to the overlay.
+      if (result.plateBox) {
+        const c = this.padded(candidate.bbox);
+        record.plateBox = [
+          c.x + result.plateBox[0] * c.width,
+          c.y + result.plateBox[1] * c.height,
+          c.x + result.plateBox[2] * c.width,
+          c.y + result.plateBox[3] * c.height,
+        ];
+      }
       this.completedTotal++;
       this.latencies.push(performance.now() - started);
       this.latencies = this.latencies.slice(-40);

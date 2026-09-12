@@ -1,5 +1,8 @@
 import { DetectorClient } from "../inference/client";
-import { TimeAwareTracker, TRACKER_VERSION } from "../tracking/tracker";
+import {
+  TimeAwareTrackerV2,
+  TRACKER_V2_VERSION,
+} from "../tracking/trackerV2";
 import { estimateSpeed, type SpeedEstimate } from "../geometry/speed";
 import type { Calibration } from "../geometry/calibration";
 import { BackgroundGuard } from "../geometry/background";
@@ -91,6 +94,12 @@ export class CameraCapture {
   background: "verified" | "background_unverified" | "camera_moved" =
     "background_unverified";
   sourceMode: "live_camera" | "replay_video" = "live_camera";
+  /**
+   * The vehicle the operator has tapped, or null. Held here rather than in
+   * React state because the analysis loop stamps it into every frame and the
+   * plate workflow needs it without a re-render.
+   */
+  selectedTrackId: number | null = null;
   onFrame = (_frame: CompletedFrame) => {};
   onStatus = (_state: string) => {};
   onError = (_message: string) => {};
@@ -177,6 +186,39 @@ export class CameraCapture {
         }
       : null;
   }
+  /**
+   * Operating mode, as the product presents it.
+   *
+   * Speed is a property of the setup, not of a toggle: it requires a calibrated
+   * homography for this exact epoch and geometry, a confirmed stationary
+   * capture, and a background the motion guard still recognises. The operator
+   * declares intent by calibrating; the motion guard keeps authority, so a
+   * camera that is picked up loses speed on the next analysed frame even though
+   * nothing was toggled.
+   */
+  get operatingMode(): {
+    operating: "handheld" | "mounted";
+    speedActive: boolean;
+    reason: string;
+  } {
+    const operating = this.mounted ? "mounted" : "handheld";
+    if (!this.mounted)
+      return { operating, speedActive: false, reason: "handheld" };
+    if (this.background === "camera_moved")
+      return { operating, speedActive: false, reason: "camera_moved" };
+    const c = this.calibration;
+    if (!c) return { operating, speedActive: false, reason: "not_calibrated" };
+    if (
+      c.captureEpoch !== this.captureEpoch ||
+      !c.stationaryConfirmed ||
+      c.frameWidth !== (this.latest?.result.frameWidth ?? c.frameWidth) ||
+      c.frameHeight !== (this.latest?.result.frameHeight ?? c.frameHeight)
+    )
+      return { operating, speedActive: false, reason: "calibration_invalid" };
+    if (this.background !== "verified")
+      return { operating, speedActive: false, reason: this.background };
+    return { operating, speedActive: true, reason: "speed_active" };
+  }
   /** Operator frame-rate request; "auto" leaves the track's own choice alone. */
   frameRate: FrameRateChoice = "auto";
   /** Operator analysis-rate request in FPS; "auto" uses the measured controller. */
@@ -245,7 +287,7 @@ export class CameraCapture {
     );
   }
   private detector: DetectorClient | null = null;
-  private tracker = new TimeAwareTracker();
+  private tracker = new TimeAwareTrackerV2();
   private guard = new BackgroundGuard();
   private rules = new CandidateRules();
   private stream: MediaStream | null = null;
@@ -750,6 +792,9 @@ export class CameraCapture {
               : ("valid_estimate" as const),
           speedReason: speed.reason,
           ruleState: rule.ruleState,
+          motion: track.motion,
+          trackState: track.state,
+          observedMs: Math.max(0, track.lastSeenMs - track.firstSeenMs),
         };
       });
       const speeds = tracks
@@ -770,12 +815,18 @@ export class CameraCapture {
         modelSha256: output.modelSha256,
         detectorProfile: String(output.profile),
         executionProvider: output.executionProvider,
-        trackerVersion: TRACKER_VERSION,
+        trackerVersion: TRACKER_V2_VERSION,
         calibrationVersion: this.calibration?.version ?? null,
         policyVersion: policy.version,
         inferenceMs: output.inferenceMs,
         analysisHz,
         tracks,
+        mode: this.operatingMode,
+        // A selection only travels while the vehicle is still on screen, so a
+        // viewer never highlights a box that no longer exists.
+        selectedTrackId: tracks.some((t) => t.trackId === this.selectedTrackId)
+          ? this.selectedTrackId
+          : null,
         stats: {
           counts,
           validSpeedCount: speeds.length,

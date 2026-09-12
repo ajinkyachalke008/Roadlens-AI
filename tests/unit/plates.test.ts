@@ -147,6 +147,7 @@ describe("B42 plate report projection", () => {
     supportingFrames: 3,
     detectorConfidence: 0.8,
     submitted: 3,
+    plateBox: null,
     ...over,
   });
   it("says nothing for a track that never entered the pipeline", () => {
@@ -468,5 +469,59 @@ describe("B43 bounded event-driven plate capture", () => {
       completed: 0,
     });
     expect(JSON.stringify(plates)).not.toContain("ABC1234");
+  });
+});
+
+/**
+ * Plate localisation feedback for the selected vehicle. The worker reports the
+ * plate box inside the crop it was sent, so the only meaningful check is that
+ * mapping it back through that crop lands inside the vehicle it came from.
+ */
+describe("B44 plate localisation for the selected vehicle", () => {
+  let plates: PlateCapture;
+  beforeEach(() => {
+    plates = new PlateCapture();
+    (globalThis as { document?: unknown }).document = {
+      createElement: () => fakeCanvas(8, 8),
+    };
+  });
+  it("carries no plate box before anything has been read", () => {
+    expect(plates.state(1).plateBox).toBeNull();
+  });
+  it("maps the worker's crop-relative box into frame coordinates", async () => {
+    const remote = fakeRemote();
+    const vehicle = track({ bbox: [0.3, 0.3, 0.62, 0.65] });
+    plates.observe(analysed(1, [vehicle]), fakeCanvas(), asRemote(remote));
+    await settle();
+    const box = plates.state(1).plateBox;
+    expect(box).not.toBeNull();
+    // The padded crop extends a little beyond the vehicle box; the plate must
+    // still land inside that padded region rather than somewhere else entirely.
+    const padX = (0.62 - 0.3) * 0.06;
+    const padY = (0.65 - 0.3) * 0.06;
+    expect(box![0]).toBeGreaterThanOrEqual(0.3 - padX - 1e-9);
+    expect(box![1]).toBeGreaterThanOrEqual(0.3 - padY - 1e-9);
+    expect(box![2]).toBeLessThanOrEqual(0.62 + padX + 1e-9);
+    expect(box![3]).toBeLessThanOrEqual(0.65 + padY + 1e-9);
+    expect(box![2]).toBeGreaterThan(box![0]);
+    expect(box![3]).toBeGreaterThan(box![1]);
+  });
+  it("keeps no plate box when the worker localised nothing", async () => {
+    const remote = fakeRemote(() => ({
+      plateText: null,
+      plateConfidence: null,
+      plateBox: null,
+    }));
+    plates.observe(analysed(1, [track()]), fakeCanvas(), asRemote(remote));
+    await settle();
+    expect(plates.state(1).plateBox).toBeNull();
+  });
+  it("drops the localisation with everything else on reset", async () => {
+    const remote = fakeRemote();
+    plates.observe(analysed(1, [track()]), fakeCanvas(), asRemote(remote));
+    await settle();
+    expect(plates.state(1).plateBox).not.toBeNull();
+    plates.reset();
+    expect(plates.state(1).plateBox).toBeNull();
   });
 });

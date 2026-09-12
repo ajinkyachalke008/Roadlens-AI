@@ -809,6 +809,15 @@ export function createRelay(config: RelayConfig) {
             v: 2,
             type: "hello.ok",
             serverEpoch,
+            /**
+             * Analysis-frame header revision this relay validates. Absent on
+             * relays deployed before the vehicle-intelligence pass, and a
+             * camera that sees it absent omits the fields those relays would
+             * reject. `FrameSchema` is strict and a rejected frame disconnects
+             * the camera, so this keeps deployment order harmless in both
+             * directions.
+             */
+            frameProtocol: 2,
             connectionId: member.id,
             role: hello.role,
             ...(hello.role === "viewer" ? { viewerId: member.id } : {}),

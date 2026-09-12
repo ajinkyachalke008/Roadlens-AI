@@ -1,5 +1,41 @@
 # RoadLens release status
 
+## Report-target plate rescue — September 12, 2026
+
+Implemented a bounded original-pixel rescue path for Showcase and new speed
+reports. The exact report frame is cropped before evidence annotation, then up
+to four distinct looks of that same track are retained for three seconds in
+RAM. A vehicle may leave after the collection window and the already-retained
+crops can still finish the existing worker/consensus pipeline. Busy crops retry
+once; traffic inference remains authoritative and the worker still admits no
+plate work ahead of traffic.
+
+Consensus now deduplicates by source-frame identity. Same-image transforms or
+retries cannot satisfy the two-frame floor. Single-frame plate candidates are
+disabled. Reports still move automatically from `Analyzing…` to a confirmed
+plate or an honest final state, and the existing `report.upsert` revision path
+keeps the paired viewer aligned. `Plate located · text unreadable` distinguishes
+successful localization from no localization without adding a wire field.
+
+The rescue cache is separate from evidence: 2 reports × 4 crops × 96 KiB =
+768 KiB maximum, 3 s TTL, and immediate cleanup on confirmation/reset/end. The
+annotated evidence bytes and download remain immutable. No persistent storage,
+plate logging, database, or generative enhancement was introduced.
+
+Measured remedy audit: 640 top-1/top-2/top-3 were identical at 86.49% exact;
+768 detector input reduced exact match to 86.04%; 960 detector input reduced
+recall. A 960-edge transport simulation improved compressed-crop exact match
+over 640 (85.14% vs 77.03%), but was not shipped because it exceeds the current
+strict 640 wire contract and lacks independent physical RoadLens validation.
+Worker production logic and the relay protocol are unchanged.
+
+Automated release gate: typecheck, lint and production build pass; 281 unit,
+85 contract, 84 integration, 42 tracking, 11 browser-model, 14 E2E, 10
+privacy, 95 worker tests / 139 worker subtests, and the real CUDA GPU pipeline
+pass. Two E2E performance comparisons measured Showcase/rescue deltas of +1.6%
+and -2.8% on the same local replay path, straddling zero within normal run
+variation. Physical iPhone recovery remains NOT YET VERIFIED.
+
 ## Annotated report evidence — September 12, 2026
 
 Showcase reports now retain one **baked annotated JPEG** rather than an

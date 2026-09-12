@@ -1,5 +1,53 @@
 # Plate recognition: architecture, measurements and limits
 
+## Report rescue path
+
+For a report tied to one observed vehicle, the camera now performs a second,
+short-lived capture operation before rendering the annotated evidence:
+
+```
+exact completed source canvas + exact report FrameResult/track
+  → padded raw vehicle crop (no red box, inset, or text)
+  → up to four distinct 640-edge JPEGs, 3 s TTL, RAM only
+  → traffic inference remains first priority
+  → one plate task at a time; each busy crop retries at most once
+  → existing worker detector/OCR
+  → consensus deduplicated by capture epoch + frame + source time
+  → existing report revision and viewer upsert
+```
+
+The annotated report JPEG is not used while a raw rescue crop exists. The
+historical evidence image never changes; only plate metadata may gain a higher
+report revision. Multiple preprocessing variants or transport retries of one
+source frame share one consensus key and therefore cannot impersonate several
+supporting frames.
+
+### Rescue bounds and diagnostics
+
+| Bound | Value |
+| --- | ---: |
+| Active report rescues | 2 |
+| Distinct raw crops per report | 4 |
+| Crop long edge | 640 px |
+| Crop target / hard bytes | 48 / 96 KiB |
+| Total rescue cache | 768 KiB |
+| Collection/retention TTL | 3 s |
+| Busy retries per crop | 1 |
+
+Advanced Diagnostics exposes only crop count, byte count, completed/refused
+attempts, and latency. Plate strings are never logged. A final report with a
+real localization but no defensible text reads `Plate located · text
+unreadable`; a confirmed result visibly states the number of distinct frames.
+
+### Reproducing the remedy comparison
+
+`training/plates/evaluate.py` accepts `--max-candidates`, `--imgsz`,
+`--crop-edge`, and `--jpeg-quality`. Use the existing `us` test command for
+top-1/2/3 and 640/768/960 comparisons. The selected production combination
+remains top-1, 640 detector input, raw fast-plate-ocr, and no preprocessing.
+The larger transport result is recorded in `PLATE_RESULTS.md` as evidence for a
+future versioned protocol experiment, not silently promoted.
+
 RoadLens reads a licence plate only for a vehicle that something has already
 qualified — an operator selection, or a speed candidate the rules produced. It
 reads a small bounded number of frames, agrees across them, and reports a plate

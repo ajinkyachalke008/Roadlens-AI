@@ -1,5 +1,32 @@
 # RoadLens implementation handoff
 
+## Plate rescue release handoff — September 12, 2026
+
+The physical `visible vehicle → Unreadable` case traced to lost source pixels:
+the report target was chosen after frame observation, while older plate
+candidates retained only metadata. `PlateCapture.beginReportRescue` now copies
+the exact report-time target crop before `annotatedEvidence` runs and keeps a
+strictly bounded set of distinct follow-up crops. `RemoteDetector` can submit
+those encoded snapshots after the live canvas has advanced or the vehicle has
+left.
+
+Production bounds are four 640-edge crops per report, two active reports,
+96 KiB per crop, 768 KiB total, three-second TTL, and one busy retry per crop.
+All blobs are RAM-only and are destroyed on confirmation, TTL, epoch reset,
+pagehide, component teardown, or End Session. The report evidence blob is never
+rewritten. The existing report revision/viewer synchronization path carries a
+successful consensus automatically.
+
+Integrity remains conservative: two genuinely distinct source frames are still
+required; same-frame variants are deduplicated; single-frame candidates remain
+disabled; no plate text is logged; `Plate located · text unreadable` is derived
+only from a real detector box. Benchmarking rejected top-2/top-3 and alternate
+detector sizes for production. The evaluation CLI now reproduces these audits;
+worker runtime logic and relay wire schemas did not change.
+
+Automated verification and deployment identifiers are recorded in the release
+entry in `docs/STATUS.md`. Physical iPhone recovery remains NOT YET VERIFIED.
+
 ## Annotated evidence release handoff — September 12, 2026
 
 Application commit `634c70e` replaces the plain Showcase evidence frame with

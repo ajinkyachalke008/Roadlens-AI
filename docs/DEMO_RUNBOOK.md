@@ -1,5 +1,22 @@
 # RoadLens demo runbook
 
+## Plate rescue behavior
+
+When Showcase creates a Traffic alert, leave the report open if the plate first
+shows `Analyzing…`. RoadLens has already copied the exact unannotated vehicle
+pixels from that report frame and may collect up to three additional distinct
+looks during the next three seconds. The vehicle can leave; retained crops may
+still settle the report automatically. A confirmed value states its distinct
+frame support. `Plate located · text unreadable` means the detector found a real
+plate region but OCR could not defend the characters; `Unreadable` remains the
+right result when captured pixels are insufficient.
+
+The red report evidence and downloaded JPEG do not change when plate metadata
+updates. End Session, page navigation, or a source reset destroys all rescue
+crops. Advanced Diagnostics may show the temporary crop count/bytes but never a
+plate string. Physical validation is still required before calling recovery
+performance verified.
+
 ## Showcase presentation flow — September 12, 2026
 
 Showcase is a small camera-page switch that automates one truthful presentation

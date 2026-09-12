@@ -1,5 +1,44 @@
 # Plate recognition: measured results and status
 
+## Report-target rescue release — September 12, 2026
+
+Physical testing exposed a lifecycle failure rather than evidence fabrication:
+Showcase selected its target after the frame-level plate observer had returned,
+and the best-frame list retained coordinates but not the source pixels. A
+vehicle could therefore be clear in immutable report evidence and still leave
+before two OCR attempts completed. The camera now copies the exact report-frame
+vehicle region before annotation and retains up to four distinct, high-quality
+raw vehicle JPEGs for three seconds. The cache is limited to two report targets,
+96 KiB per crop and 768 KiB total; confirmation, timeout, epoch change,
+pagehide, or End Session destroys it.
+
+The 222-image OpenALPR US set was rerun to separate possible remedies. These
+remain single-frame public-dataset results, not a physical-phone recovery rate.
+
+| evaluation | exact | character | coverage | non-empty wrong | conclusion |
+| --- | ---: | ---: | ---: | ---: | --- |
+| 640 detector, top 1 | 86.49% | 95.34% | 99.10% | 12.61% | retained |
+| 640 detector, top 2 | 86.49% | 95.34% | 99.10% | 12.61% | rejected: no recovery |
+| 640 detector, top 3 | 86.49% | 95.34% | 99.10% | 12.61% | rejected: no recovery |
+| 768 detector, top 1 | 86.04% | 96.25% | 99.55% | 13.51% | rejected: lower exact / more wrong |
+| 960 detector, top 1 | 86.94% | 95.80% | 98.20% | 11.26% | rejected: lower recall and slower |
+
+A transport-crop simulation also compared 640/768/960 long edges at JPEG 90
+with the detector held at 640. Exact match was 77.03%, 84.23%, and 85.14%
+respectively. This supports a future larger rescue payload, but it was not
+shipped: the current strict relay/worker contract caps crops at 640 and this
+public set contains no RoadLens phone crops with an independently held-out
+tuning/test split. Changing the wire contract and local worker on that evidence
+alone would create deployment-skew risk. The shipped rescue uses 640, preserves
+the current false-assertion policy, and gains information through independent
+source frames rather than a larger unvalidated protocol.
+
+The public corpus cannot measure `Unreadable → correct recovery` because it has
+one image per vehicle. Functional tests prove that two retained distinct crops
+can confirm a plate after the live vehicle leaves; the real recovery rate and
+false-promotion rate remain **NOT YET MEASURED** until `user_eval` contains
+consented physical samples. Single-frame candidates remain disabled.
+
 Everything below was produced by the commands in
 [PLATE_VALIDATION.md](PLATE_VALIDATION.md) on this project's own hardware. The
 two validations are kept apart on purpose: public-dataset numbers say what the

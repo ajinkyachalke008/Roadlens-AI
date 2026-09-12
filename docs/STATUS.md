@@ -1,5 +1,53 @@
 # RoadLens release status
 
+## Annotated report evidence — September 12, 2026
+
+Showcase reports now retain one **baked annotated JPEG** rather than an
+unmarked scene. The renderer consumes the exact completed analysis canvas and
+finds the exact observed report track in that same immutable `FrameResult`.
+It draws only that target with the existing red `TRAFFIC ALERT` language plus
+real class, stable track ID and detector score. The full frame remains visible;
+a same-frame target inset is added only when the reported vehicle is small.
+Nothing is re-detected or read from the later live view.
+
+The annotated JPEG is the single bounded image retained in `SessionStore`.
+The camera modal, explicit download and paired viewer therefore consume the
+same bytes through the existing evidence request path. The raw image is not
+retained as a second copy, avoiding doubled RAM. The verified replay artifact
+was 71,846 bytes, below the existing 80 KiB target and 128 KiB protocol cap.
+End session/pagehide eviction and all prior RAM-only limits are unchanged.
+
+Report details now say `Measurement mode`, `Speed status`, `Configured speed
+limit` and `Candidate margin`. The old `Entered demo limit` / `Demo margin`
+labels are gone, and limit/margin rows are hidden when no speed limit was
+configured. Handheld Showcase reports continue to say `Mounted calibration
+required`; no speed or plate fallback was added.
+
+Fresh verification on application commit `634c70e` follows: 272/272 unit,
+85/85 contract, 84/84 real relay integration, 42/42 tracking, 11/11
+browser-model, 14/14 browser E2E and
+10/10 privacy browser scenarios pass. Privacy scans cover 53 application
+modules and 224 tracked files. Worker tests remain green at 95 tests/139
+subtests, and the actual browser → relay → RTX CUDA acceptance passes 1/1.
+Typecheck, lint, build, compiled same-origin and split-origin production smoke,
+and all three deployment-schema checks pass.
+
+The local matched Showcase diagnostic measured 4.871 analyzed Hz off and
+4.936 Hz on. The deployed run measured 4.239 Hz off and 4.256 Hz on. Evidence
+encoding runs once at report creation (and once only if that report is upgraded
+to a genuine speed candidate), never per analysis frame. Camera route gzip grew
+from 44.45 to 46.07 KiB. No meaningful primary detector regression was
+observed; these short desktop replay samples are not physical-phone evidence.
+
+Application commit `634c70e` is pushed to `origin/main`. Vercel deployment
+`GYX9nLWHV8ucjZmiG2VagtJ76XsR` completed successfully, and the public
+<https://roadlens-ai-five.vercel.app> passed the new annotated-evidence
+Showcase camera/viewer/download acceptance 1/1 against the unchanged Render
+relay. No backend, shared wire schema or worker application source changed.
+
+Physical-phone layout/performance, live-road plate legibility and field speed
+accuracy remain **NOT VERIFIED**.
+
 ## Showcase release — September 12, 2026
 
 The release candidate adds one compact, accessible **Showcase** switch to the

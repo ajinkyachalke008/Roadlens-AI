@@ -38,9 +38,14 @@ the camera tab's RAM.
    consensus text only if OCR succeeds; otherwise show **Analyzing…**,
    **Unreadable**, or **Plate unavailable**. The report appears immediately and
    follows later plate consensus updates.
-7. The paired viewer receives the report and its one bounded RAM evidence image
-   through the normal report/evidence flow. The operator may review or explicitly
-   download it as usual.
+7. Open the report. Its full report-time frame now has a baked red box and
+   `TRAFFIC ALERT · CLASS · ID` label on the exact reported vehicle. Small
+   targets also receive a same-frame corner inset. The paired viewer receives
+   that same annotated JPEG through the normal evidence flow, and **Download
+   image** saves the same marked bytes.
+8. Point out the professional details: **Trigger**, **Vehicle**, **Measurement
+   mode**, **Speed status**, **Plate**, detector score, model, calibration and
+   tracker. Limit and margin stay hidden when no limit was configured.
 
 Showcase produces one automatic event per enabled run. Toggle it off and on to
 start a fresh run. Toggle off clears the Showcase target without deleting an

@@ -1,5 +1,33 @@
 # RoadLens implementation handoff
 
+## Annotated evidence release handoff — September 12, 2026
+
+Application commit `634c70e` replaces the plain Showcase evidence frame with
+one bounded, baked report image. The annotation is generated once from the
+exact completed canvas and the exact observed track in that frame: red target
+box, `TRAFFIC ALERT`, real class/ID/score, and a conditional same-frame inset
+for small targets. No later live coordinates, second inference, inferred box,
+plate text or speed value can enter the render.
+
+`SessionStore` retains only the annotated JPEG, not a second raw copy. The
+existing report modal, download helper and viewer evidence request therefore
+all use byte-identical marked evidence. The release sample was 71,846 bytes,
+inside the existing 80 KiB target and 128 KiB wire cap. All lifecycle cleanup,
+20-image/8 MiB RAM bounds and no-persistence rules remain unchanged.
+
+The detail drawer removes `Entered demo limit` and `Demo margin`, adds
+professional measurement mode/speed status wording, and hides limit/margin
+when none was configured. Handheld speed remains null, plate text still
+requires real consensus, and genuine mounted speed promotion remains intact.
+
+Verification: 272 unit, 85 contract, 84 integration, 42 tracking, 11 model,
+14 E2E and 10 privacy browser scenarios pass; source/privacy scans cover 53
+application modules and 224 tracked files. Compiled same/split production,
+95 worker tests/139 subtests and actual CUDA acceptance pass. Vercel deployment
+`GYX9nLWHV8ucjZmiG2VagtJ76XsR` is successful, and the public frontend passed
+the annotated camera/viewer/download acceptance 1/1 against the unchanged
+Render relay. Physical-phone acceptance remains **NOT VERIFIED**.
+
 ## Showcase release handoff — September 12, 2026
 
 RoadLens now has a top-level **Showcase** switch on the Camera page. It defaults

@@ -996,7 +996,10 @@ test("@frontend privacy: real local replay inference, observation and explicit d
       new Set(smaller.reports.map((report) => report.captureEpoch)).size,
     ).toBe(2);
     await viewer.page.goto("/viewer");
-    if (process.env.ROADLENS_FRONTEND_ONLY === "true") {
+    if (
+      process.env.ROADLENS_FRONTEND_ONLY === "true" &&
+      initialProfile !== "640"
+    ) {
       await expect(
         camera.page.getByRole("button", { name: "Share camera", exact: true }),
       ).toBeDisabled();
@@ -1010,6 +1013,14 @@ test("@frontend privacy: real local replay inference, observation and explicit d
       expect(
         requests.filter((url) => /\/api\/|\/healthz(?:\?|$)/.test(url)),
       ).toEqual([]);
+    } else if (initialProfile === "640") {
+      await expect(
+        camera.page.getByRole("button", {
+          name: "Sharing active",
+          exact: true,
+        }),
+      ).toBeVisible();
+      await expect(viewer.page.getByLabel("Camera code")).toBeEnabled();
     } else {
       await expect(
         camera.page.getByRole("button", { name: "Share camera", exact: true }),

@@ -40,6 +40,7 @@ import { PlateCapture, type PlateCaptureMode } from "../plates/capture";
 import { plateFields } from "../plates/report";
 import { SelectedVehicle } from "../components/SelectedVehicle";
 import { legacyFrame } from "../transport/legacyFrame";
+import { annotatedEvidence } from "../session/evidence";
 import {
   ShowcaseController,
   showcaseStatusLabel,
@@ -356,6 +357,12 @@ export default function Camera() {
           showcaseReportId === id &&
           store.reports.get(id)?.kind === "observation"
         ) {
+          const evidenceImage = annotatedEvidence(
+            completed.canvas,
+            completed.result,
+            candidate.trackId,
+            "speed_candidate",
+          );
           store.upgradeToSpeedCandidate(
             id,
             completed.result,
@@ -369,7 +376,7 @@ export default function Camera() {
               residualM: candidate.estimate.residualM,
               coverageMs: candidate.estimate.coverageMs,
             },
-            completed.jpeg,
+            evidenceImage ?? undefined,
             plate,
           );
           continue;
@@ -585,6 +592,14 @@ export default function Camera() {
       const speedCandidate = completed.candidates.find(
         (candidate) => candidate.trackId === target.trackId,
       );
+      const evidenceImage = annotatedEvidence(
+        completed.canvas,
+        completed.result,
+        target.trackId,
+        "showcase",
+      );
+      if (!evidenceImage)
+        throw new Error("Showcase evidence could not mark the report target");
       const reportId = speedCandidate
         ? (store.episodeId(speedCandidate.episodeKey) ?? crypto.randomUUID())
         : crypto.randomUUID();
@@ -592,7 +607,7 @@ export default function Camera() {
       const report = store.save(
         completed.result,
         completed.policy,
-        completed.jpeg,
+        evidenceImage,
         speedCandidate ? "speed_candidate" : "observation",
         target.trackId,
         reportId,
@@ -1598,9 +1613,7 @@ export default function Camera() {
           revision={validationRevision}
           frame={frame?.result ?? null}
           estimates={estimates.current}
-          calibrationVersion={
-            capture.current?.calibration?.version ?? null
-          }
+          calibrationVersion={capture.current?.calibration?.version ?? null}
           speedUnit={speedUnit}
           onChange={() => setValidationRevision((n) => n + 1)}
           onClose={() => setDrawer(null)}

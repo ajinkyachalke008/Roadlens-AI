@@ -39,6 +39,41 @@ export const isShowcaseReport = (report: Report) =>
 
 const speedReasons = (report: Report) =>
   report.validityReasons.filter((reason) => reason !== SHOWCASE_TRIGGER_REASON);
+
+const SPEED_REASON_LABELS: Record<string, string> = {
+  handheld: "Mounted calibration required",
+  not_calibrated: "Mounted calibration required",
+  calibration_invalid: "Calibration needs review",
+  background_unverified: "Background validation required",
+  camera_moved: "Camera moved · recalibrate",
+  insufficient_samples: "More observations required",
+  insufficient_displacement: "More vehicle movement required",
+  sampling_too_sparse: "Analysis sampling too sparse",
+  outside_zone: "Vehicle outside measurement zone",
+  residual_too_high: "Measurement consistency too low",
+  inconsistent_direction: "Vehicle direction not stable",
+  implausible_motion: "Motion did not pass validation",
+  time_discontinuity: "Measurement continuity reset",
+  track_ambiguous: "Vehicle track is ambiguous",
+  paused: "Measurement paused",
+};
+
+export function reportSpeedStatus(report: Report) {
+  if (report.speedMps !== null) return "Qualified measurement";
+  const labels = [
+    ...new Set(
+      speedReasons(report).map(
+        (reason) => SPEED_REASON_LABELS[reason] ?? "No qualified measurement",
+      ),
+    ),
+  ];
+  return labels.join(" · ") || "No qualified measurement";
+}
+
+export function reportMeasurementMode(report: Report) {
+  if (report.validityReasons.includes("handheld")) return "Handheld";
+  return report.calibrationVersion === null ? "Uncalibrated" : "Mounted";
+}
 export function Reports({
   store,
   revision,
@@ -194,13 +229,35 @@ export function Reports({
               <img
                 className="evidence"
                 src={url}
-                alt="Exact event frame retained by the camera"
+                alt={
+                  isShowcaseReport(report)
+                    ? `Annotated report evidence with a red alert box around ${(report.className ?? "vehicle").toUpperCase()} · ID ${report.trackId}`
+                    : "Exact event frame retained by the camera"
+                }
+                data-testid="report-evidence"
+                data-evidence-annotation={
+                  isShowcaseReport(report) ? "showcase" : "none"
+                }
+                data-evidence-frame-id={report.frameId}
+                data-evidence-track-id={report.trackId ?? undefined}
               />
+              {isShowcaseReport(report) && (
+                <p className="evidence-caption">
+                  <strong>Annotated report frame</strong>
+                  <span>The red box marks the exact reported vehicle.</span>
+                </p>
+              )}
               <button
                 onClick={() => {
                   const blob =
                     report.evidenceId && store.image(report.evidenceId);
-                  if (blob) download(blob, "roadlens-evidence.jpg");
+                  if (blob)
+                    download(
+                      blob,
+                      isShowcaseReport(report)
+                        ? "roadlens-traffic-alert.jpg"
+                        : "roadlens-evidence.jpg",
+                    );
                 }}
               >
                 Download image
@@ -249,6 +306,8 @@ export function Reports({
                 displaySpeed(report.speedMps, speedUnit)
               )}
             </dd>
+            <dt>Measurement mode</dt>
+            <dd>{reportMeasurementMode(report)}</dd>
             {report.speedMps !== null &&
               report.policy.speedLimitMps !== null && (
                 <>
@@ -256,7 +315,7 @@ export function Reports({
                   <dd data-testid="report-over">
                     {report.speedMps > report.policy.speedLimitMps
                       ? `+${displaySpeed(report.speedMps - report.policy.speedLimitMps, speedUnit)}`
-                      : "Within the entered limit"}
+                      : "Within the configured limit"}
                   </dd>
                 </>
               )}
@@ -276,20 +335,18 @@ export function Reports({
                 </dd>
               </>
             )}
-            <dt>Validity</dt>
-            <dd>
-              {report.speedMps === null
-                ? speedReasons(report).join(", ") || "No qualified speed"
-                : "Qualified estimate"}
+            <dt>Speed status</dt>
+            <dd data-testid="report-speed-status">
+              {reportSpeedStatus(report)}
             </dd>
-            <dt>Entered demo limit</dt>
-            <dd>
-              {report.policy.speedLimitMps === null
-                ? "—"
-                : displaySpeed(report.policy.speedLimitMps, speedUnit)}
-            </dd>
-            <dt>Demo margin</dt>
-            <dd>{displaySpeed(report.policy.demoMarginMps, speedUnit)}</dd>
+            {report.policy.speedLimitMps !== null && (
+              <>
+                <dt>Configured speed limit</dt>
+                <dd>{displaySpeed(report.policy.speedLimitMps, speedUnit)}</dd>
+                <dt>Candidate margin</dt>
+                <dd>{displaySpeed(report.policy.demoMarginMps, speedUnit)}</dd>
+              </>
+            )}
             <dt>Detector score</dt>
             <dd title="Model detection score, not speed accuracy or event probability">
               {report.score === null

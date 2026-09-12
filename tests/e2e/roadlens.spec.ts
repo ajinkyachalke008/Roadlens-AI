@@ -8,6 +8,7 @@ import {
   type Download,
 } from "@playwright/test";
 import { writeFile } from "node:fs/promises";
+import { createHash } from "node:crypto";
 import { decodePacket } from "../../shared/src/packets";
 import type { PacketHeader } from "../../shared/src/schemas";
 import { localTlsAllowed } from "./localTls";
@@ -317,11 +318,14 @@ async function boundedPrivacy(page: Page) {
   });
   return trace;
 }
-async function downloadText(download: Download) {
+async function downloadBytes(download: Download) {
   const stream = await download.createReadStream();
   const chunks: Buffer[] = [];
   for await (const chunk of stream) chunks.push(Buffer.from(chunk));
-  return Buffer.concat(chunks).toString("utf8");
+  return Buffer.concat(chunks);
+}
+async function downloadText(download: Download) {
+  return (await downloadBytes(download)).toString("utf8");
 }
 async function exportReports(page: Page) {
   const event = page.waitForEvent("download", { timeout: 15_000 });
@@ -1843,17 +1847,123 @@ test("Showcase: accessible mobile toggle drives one real replay event and viewer
     await expect(camera.page.getByTestId("report-trigger")).toHaveText(
       "Showcase trigger",
     );
-    await expect(
-      camera.page.getByAltText("Exact event frame retained by the camera"),
-    ).toBeVisible();
+    const cameraEvidence = camera.page.getByTestId("report-evidence");
+    await expect(cameraEvidence).toBeVisible();
+    await expect(cameraEvidence).toHaveAttribute(
+      "data-evidence-annotation",
+      "showcase",
+    );
+    await expect(cameraEvidence).toHaveAttribute(
+      "data-evidence-frame-id",
+      report.frameId,
+    );
+    await expect(cameraEvidence).toHaveAttribute(
+      "data-evidence-track-id",
+      String(report.trackId),
+    );
+    await expect(cameraEvidence).toHaveAttribute(
+      "alt",
+      new RegExp(
+        `red alert box around ${report.className?.toUpperCase()} · ID ${report.trackId}`,
+      ),
+    );
+    // Several analyzed frames have passed since report creation. The retained
+    // pixels and target identity must still belong to the report frame.
+    await expect(camera.page.getByTestId("analyzed-frame")).not.toHaveAttribute(
+      "data-frame-id",
+      report.frameId,
+    );
+    const annotated = await cameraEvidence.evaluate(async (element) => {
+      const image = element as HTMLImageElement;
+      const blob = await (await fetch(image.src)).blob();
+      const digest = Array.from(
+        new Uint8Array(
+          await crypto.subtle.digest("SHA-256", await blob.arrayBuffer()),
+        ),
+      )
+        .map((byte) => byte.toString(16).padStart(2, "0"))
+        .join("");
+      const bitmap = await createImageBitmap(blob);
+      const canvas = document.createElement("canvas");
+      canvas.width = bitmap.width;
+      canvas.height = bitmap.height;
+      const context = canvas.getContext("2d")!;
+      context.drawImage(bitmap, 0, 0);
+      bitmap.close();
+      const pixels = context.getImageData(
+        0,
+        0,
+        canvas.width,
+        canvas.height,
+      ).data;
+      let alertPixels = 0;
+      for (let index = 0; index < pixels.length; index += 4) {
+        const red = pixels[index]!;
+        const green = pixels[index + 1]!;
+        const blue = pixels[index + 2]!;
+        if (red > 185 && red - green > 80 && red - blue > 55) alertPixels++;
+      }
+      return {
+        digest,
+        alertPixels,
+        width: canvas.width,
+        height: canvas.height,
+      };
+    });
+    expect(annotated.width).toBeGreaterThan(0);
+    expect(annotated.height).toBeGreaterThan(0);
+    expect(annotated.alertPixels).toBeGreaterThan(250);
+    await expect(camera.page.getByText("Annotated report frame")).toBeVisible();
+    await expect(camera.page.getByText("Entered demo limit")).toHaveCount(0);
+    await expect(camera.page.getByText("Demo margin")).toHaveCount(0);
+    await expect(camera.page.getByText("Speed status")).toBeVisible();
+    await expect(camera.page.getByTestId("report-speed-status")).toHaveText(
+      "Mounted calibration required",
+    );
+    const downloadEvent = camera.page.waitForEvent("download");
+    await camera.page.getByRole("button", { name: "Download image" }).click();
+    const evidenceDownload = await downloadEvent;
+    expect(evidenceDownload.suggestedFilename()).toBe(
+      "roadlens-traffic-alert.jpg",
+    );
+    const downloaded = await downloadBytes(evidenceDownload);
+    expect(createHash("sha256").update(downloaded).digest("hex")).toBe(
+      annotated.digest,
+    );
+    const annotatedPath = testInfo.outputPath(
+      "annotated-showcase-evidence.jpg",
+    );
+    await writeFile(annotatedPath, downloaded);
+    await testInfo.attach("annotated-showcase-evidence.jpg", {
+      path: annotatedPath,
+      contentType: "image/jpeg",
+    });
+    await camera.page.screenshot({
+      path: testInfo.outputPath("showcase-report-mobile.png"),
+      fullPage: true,
+    });
     await camera.page.getByRole("button", { name: "Close drawer" }).click();
     await viewer.page.locator(".report-row").click();
     await expect(viewer.page.getByTestId("report-trigger")).toHaveText(
       "Showcase trigger",
     );
-    await expect(
-      viewer.page.getByAltText("Exact event frame retained by the camera"),
-    ).toBeVisible();
+    const viewerEvidence = viewer.page.getByTestId("report-evidence");
+    await expect(viewerEvidence).toBeVisible();
+    await expect(viewerEvidence).toHaveAttribute(
+      "data-evidence-frame-id",
+      report.frameId,
+    );
+    const viewerDigest = await viewerEvidence.evaluate(async (element) => {
+      const bytes = await (
+        await fetch((element as HTMLImageElement).src)
+      ).arrayBuffer();
+      return Array.from(
+        new Uint8Array(await crypto.subtle.digest("SHA-256", bytes)),
+      )
+        .map((byte) => byte.toString(16).padStart(2, "0"))
+        .join("");
+    });
+    expect(viewerDigest).toBe(annotated.digest);
     await viewer.page.getByRole("button", { name: "Close drawer" }).click();
 
     await camera.page.waitForTimeout(1_000);

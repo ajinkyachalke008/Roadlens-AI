@@ -727,6 +727,17 @@ input[type="checkbox"] {
   border-radius: 7px;
   margin-bottom: 16px;
 }
+.evidence-caption {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  margin: -8px 0 14px;
+  color: var(--muted);
+  font-size: 11px;
+}
+.evidence-caption strong {
+  color: var(--ink);
+}
 .calibration-frame {
   cursor: crosshair;
 }

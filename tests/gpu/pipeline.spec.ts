@@ -282,9 +282,11 @@ test("real GPU camera → relay → CUDA → synchronized reports/viewer; fallba
   await expect(view.getByTestId("report-trigger")).toHaveText(
     "Showcase trigger",
   );
-  await expect(
-    view.getByAltText("Exact event frame retained by the camera"),
-  ).toBeVisible();
+  await expect(view.getByTestId("report-evidence")).toBeVisible();
+  await expect(view.getByTestId("report-evidence")).toHaveAttribute(
+    "data-evidence-annotation",
+    "showcase",
+  );
   await expect(
     view.getByRole("button", { name: "Mark noted", exact: true }).first(),
   ).toBeVisible();

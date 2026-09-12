@@ -8,7 +8,7 @@ single quality-aware lifecycle:
 ```
 4 s minimum arming
   → search for a real eligible track
-  → 800 ms stable candidate dwell
+  → strong readiness, or 800 ms stable intermediate-candidate dwell
   → lock that identity (amber ACQUIRING)
   → collect/rank distinct real source crops while it approaches
   → create immutable event evidence at quality/trajectory trigger (red alert)

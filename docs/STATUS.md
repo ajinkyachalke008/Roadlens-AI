@@ -4,8 +4,9 @@
 
 The early-capture weakness is fixed in source. Showcase no longer creates an
 event primarily because a five-second timer elapsed. It arms at 4.0 s of
-advancing source time, selects only a real confirmed vehicle, observes it for
-800 ms, locks that identity in amber, and waits for useful real source pixels.
+advancing source time, selects only a real confirmed vehicle, and locks that
+identity in amber once readiness is already strong or an intermediate candidate
+has remained eligible for 800 ms. It then waits for useful real source pixels.
 The normal readiness threshold is 0.68; bounded quality/trajectory fallbacks
 start at 0.56; per-target and overall waits are 6.5 s and 25 s. Readiness uses
 vehicle pixel size, measured crop sharpness/quality, centrality, framing,

@@ -20,8 +20,9 @@ The release uses an ideal 1920×1080/30 Showcase camera profile with a graceful
 1280×720 fallback and visible actual settings. It can score at most 16 distinct
 cadence-spaced looks over 4.8 s, retains/submits the top eight, admits OCR every
 600 ms, keeps at most 768 KiB of raw plate-target pixels, and permits only one
-plate request in flight. The normal/fallback readiness thresholds are 0.68/0.56; target and
-overall waits are 6.5/25 s. Same-frame variants cannot satisfy consensus.
+plate request in flight. The normal/fallback readiness thresholds are
+0.68/0.56; target and overall waits are 6.5/25 s. Same-frame variants cannot
+satisfy consensus.
 
 Reports keep three concepts separate:
 

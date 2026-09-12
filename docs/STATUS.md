@@ -1,6 +1,6 @@
 # RoadLens release status
 
-## Adaptive plate acquisition release candidate — September 12, 2026
+## Adaptive plate acquisition release — September 12, 2026
 
 The early-capture weakness is fixed in source. Showcase no longer creates an
 event primarily because a five-second timer elapsed. It arms at 4.0 s of
@@ -22,8 +22,9 @@ Actual physical-iPhone resolution and throughput remain **NOT YET VERIFIED**.
 
 At target lock, a 4.8 s source-time acquisition begins. At 320 ms cadence it can
 score at most 16 distinct source looks; only the quality-ranked top eight
-96 KiB-or-smaller crops are retained and submitted, with 768 KiB maximum raw-crop memory.
-OCR submissions remain single-flight and at least 600 ms apart. Two distinct
+96 KiB-or-smaller crops are retained and submitted, with 768 KiB maximum
+raw-crop memory. OCR submissions remain single-flight and at least 600 ms
+apart. Two distinct
 frames are still required for confirmation, and confirmation stops capture and
 erases raw crops immediately. A strong single OCR result may be shown only as
 `Possible plate · Unconfirmed`; it never populates the confirmed plate field.

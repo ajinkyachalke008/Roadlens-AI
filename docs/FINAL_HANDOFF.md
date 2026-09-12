@@ -46,11 +46,19 @@ analysis-rate deltas, while the isolated interleaved benchmark measured -1.2%.
 The sign-changing results show no sustained local regression and do not
 establish physical-phone performance.
 
-Deployment state at this checkpoint: the source diff is ready for final review;
-Git push and production deployment are not yet recorded. Relay protocol v2 must
-be deployed before the frontend. The Windows worker code did not change and
-does not need a restart. The final production identifiers and smoke results will
-be recorded here after deployment.
+Application commit `6ff75f237933722fe0d1ae9ae17311026d96c7a6` is pushed to
+public `main`. Vercel deployment `DsD7FGadsMDGbsWucydYRMP7qv4B` completed, and
+Render manual deployment `dep-daitkam7bikc73a1ij3g` is Live from that commit.
+The deployed relay advertises report protocol v2 over a real WSS owner
+handshake. The public paired-browser cloud smoke and a separate 390×844
+Showcase/report/viewer/download/cleanup acceptance each pass 1/1.
+
+The hosted Vercel → Render → existing local RTX path measured 9.983 result Hz,
+46.6 ms median RTT, 119 ms result age, 223 ms overlay age, 2.85 ms encode,
+15.09 ms total worker time and 11.42 ms CUDA inference over 10 seconds, with
+zero superseded/stale results and zero console errors. The worker application
+did not change, reconnected to the restarted relay automatically, and requires
+no restart for this release.
 
 Physical iPhone acquisition, source resolution, real-road unreadable recovery,
 false plate promotion and thermal behavior remain **NOT YET VERIFIED**. Follow

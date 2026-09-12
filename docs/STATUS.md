@@ -54,11 +54,23 @@ benchmark measured 63.83 Hz baseline versus 63.05 Hz interleaved (-1.2%), with
 accuracy and 99.10% coverage. These are local replay/public-data measurements;
 physical unreadable recovery and wrong-promotion rates remain unmeasured.
 
-Git push and production deployment are pending the final diff review. The relay
-source changed only to advertise report protocol v2; it must be deployed before
-the frontend. The worker runtime is unchanged and requires no restart. The new
-frontend downlevels report metadata for an older relay, so mixed deployment
-fails safely.
+Application commit `6ff75f237933722fe0d1ae9ae17311026d96c7a6` is pushed to
+`origin/main`. Vercel deployment `DsD7FGadsMDGbsWucydYRMP7qv4B` completed for
+that commit. Render manual deployment `dep-daitkam7bikc73a1ij3g` then built and
+went Live in 48.9 s; a real WSS owner handshake reports `frameProtocol: 2` and
+`reportProtocol: 2`. The new frontend's downlevel adapter kept the brief
+frontend-new/relay-old interval compatible.
+
+The deployed HTTPS/WSS paired-browser smoke passes 1/1, and a separate deployed
+390×844 Showcase replay acceptance passes 1/1 with the exact event/viewer image,
+download, mobile layout, one-event and cleanup checks. Its matched sample was
+4.153 Hz off versus 4.181 Hz on (+0.7%) with unchanged 307 ms overlay age. A
+10-second hosted Vercel → Render → local RTX measurement returned 9.983 result
+Hz, 46.6 ms median RTT, 119 ms result age, 223 ms overlay age, 2.85 ms encode,
+15.09 ms worker time, 11.42 ms CUDA inference, one dropped request, zero
+superseded/stale results and zero console errors. The worker runtime is
+unchanged; the already-running worker reconnected automatically and no restart
+is required.
 
 The previous report-target rescue section below is preserved as release
 history; its four-frame/three-second contract is superseded.

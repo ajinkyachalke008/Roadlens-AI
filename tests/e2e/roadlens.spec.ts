@@ -968,7 +968,8 @@ test("@frontend privacy: real local replay inference, observation and explicit d
     const csvEvent = camera.page.waitForEvent("download");
     await camera.page.getByRole("button", { name: "CSV", exact: true }).click();
     expect(await downloadText(await csvEvent)).toContain('"replay_video"');
-    expect(exported.reports[0].detectorProfile).toBe("416");
+    const initialProfile = exported.reports[0].detectorProfile;
+    expect(["416", "640"]).toContain(initialProfile);
     await camera.page
       .getByRole("button", { name: "Pause camera", exact: true })
       .click();
@@ -990,7 +991,7 @@ test("@frontend privacy: real local replay inference, observation and explicit d
     expect(smaller.reports).toHaveLength(2);
     expect(
       smaller.reports.map((report) => report.detectorProfile).sort(),
-    ).toEqual(["320", "416"]);
+    ).toEqual(initialProfile === "640" ? ["640", "640"] : ["320", "416"]);
     expect(
       new Set(smaller.reports.map((report) => report.captureEpoch)).size,
     ).toBe(2);

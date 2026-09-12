@@ -39,6 +39,7 @@ import { RemoteDetector } from "../inference/remote";
 import { PlateCapture, type PlateCaptureMode } from "../plates/capture";
 import { plateFields } from "../plates/report";
 import { SelectedVehicle } from "../components/SelectedVehicle";
+import { legacyFrame } from "../transport/legacyFrame";
 export default function Camera() {
   const video = useRef<HTMLVideoElement>(null);
   const capture = useRef<CameraCapture | null>(null);
@@ -361,18 +362,15 @@ export default function Camera() {
           // the header with a strict schema and disconnects the camera when it
           // sees one it does not know, so those fields are dropped rather than
           // risking the session. The viewer simply loses mode and selection.
-          const {
-            mode: _mode,
-            selectedTrackId: _selectedTrackId,
-            ...legacy
-          } = completed.result;
           const sent = client.sendPacket(
             {
               v: 2,
               type: "analysis.frame",
               frameId: completed.result.frameId,
               result:
-                client.frameProtocol >= 2 ? completed.result : legacy,
+                client.frameProtocol >= 2
+                  ? completed.result
+                  : legacyFrame(completed.result),
               imageWidth: completed.jpegWidth,
               imageHeight: completed.jpegHeight,
               imageLength: buffer.byteLength,

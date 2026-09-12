@@ -56,6 +56,8 @@ interface TrackRecord {
   requested: boolean;
   /** Last successful localisation, already mapped into frame coordinates. */
   plateBox: readonly [number, number, number, number] | null;
+  /** When this track entered the pipeline, for the analysis deadline. */
+  startedAt: number;
 }
 const VEHICLES = new Set(["car", "motorcycle", "bus", "truck"]);
 /** Vehicle boxes are tight; a plate sits at the very edge of one. */
@@ -64,11 +66,15 @@ const CROP_PADDING = 0.06;
 export class PlateCapture {
   mode: PlateCaptureMode = "candidates";
   onChange = () => {};
+  /** Injectable so the deadline is testable without waiting for it. */
+  constructor(private readonly clock: () => number = () => performance.now()) {}
   /** Set when the leased worker has no plate pipeline at all. */
   private unavailable = false;
   private epoch: string | null = null;
   private tracks = new Map<number, TrackRecord>();
   private explicit = new Set<number>();
+  /** When each explicit request was made, so the card always resolves. */
+  private requestedAt = new Map<number, number>();
   private busy = false;
   private lastSubmittedAt = -Infinity;
   private submittedTotal = 0;
@@ -95,6 +101,7 @@ export class PlateCapture {
   reset() {
     this.tracks.clear();
     this.explicit.clear();
+    this.requestedAt.clear();
     this.epoch = null;
     this.busy = false;
     this.unavailable = false;
@@ -110,6 +117,12 @@ export class PlateCapture {
   request(trackId: number) {
     if (this.explicit.size >= PLATE_LIMITS.tracks) return false;
     this.explicit.add(trackId);
+    // The moment of asking starts the clock, not the first successful
+    // submission. Refusals hand the frame budget back so a better look can be
+    // tried, which is right, but it must not leave the operator being told
+    // nothing was analysed while the system is still trying.
+    if (!this.requestedAt.has(trackId))
+      this.requestedAt.set(trackId, this.clock());
     return true;
   }
 
@@ -125,9 +138,15 @@ export class PlateCapture {
         submitted: record?.submitted ?? 0,
         plateBox: null,
       };
-    if (!record || (!record.submitted && !record.inFlight))
+    if (!record || (!record.submitted && !record.inFlight)) {
+      const asked = this.requestedAt.get(trackId);
       return {
-        status: "idle",
+        status:
+          asked === undefined
+            ? "idle"
+            : this.clock() - asked >= PLATE_LIMITS.analysisDeadlineMs
+              ? "unreadable"
+              : "pending",
         plateText: null,
         plateConfidence: null,
         supportingFrames: 0,
@@ -135,12 +154,16 @@ export class PlateCapture {
         submitted: 0,
         plateBox: null,
       };
+    }
     const consensus = plateConsensus(record.observations);
-    // A track that has not yet spent its frame budget, or still has work in
-    // flight, is reported as pending rather than unreadable: the UI must not
-    // flash a verdict it is about to change.
+    // A track with budget left and work in flight is pending, not unreadable:
+    // the UI must not flash a verdict it is about to change. But a vehicle can
+    // turn away or simply never show a legible plate, so the deadline settles
+    // what the frame budget alone would leave pending forever.
     const exhausted =
-      !record.inFlight && record.submitted >= PLATE_LIMITS.framesPerTrack;
+      !record.inFlight &&
+      (record.submitted >= PLATE_LIMITS.framesPerTrack ||
+        this.clock() - record.startedAt >= PLATE_LIMITS.analysisDeadlineMs);
     const status: PlateTrackStatus = consensus.plateText
       ? "read"
       : exhausted
@@ -177,6 +200,7 @@ export class PlateCapture {
       if (!record.inFlight && record.submitted >= PLATE_LIMITS.framesPerTrack) {
         this.tracks.delete(trackId);
         this.explicit.delete(trackId);
+        this.requestedAt.delete(trackId);
         return true;
       }
     return false;
@@ -227,6 +251,7 @@ export class PlateCapture {
       if (this.epoch !== null) {
         this.tracks.clear();
         this.explicit.clear();
+    this.requestedAt.clear();
         this.busy = false;
       }
       this.epoch = frame.captureEpoch;
@@ -250,6 +275,7 @@ export class PlateCapture {
           inFlight: false,
           requested: false,
           plateBox: null,
+          startedAt: this.clock(),
         };
         this.tracks.set(track.trackId, record);
       }
@@ -262,14 +288,15 @@ export class PlateCapture {
         sharpness: cropSharpness(canvas, track.bbox),
       });
       if (quality <= 0) continue;
-      record.candidates.push({
+      const current: Candidate = {
         quality,
         bbox: track.bbox,
         frameSeq: frame.frameSeq,
         frameId: frame.frameId,
         sourceTimeMs: frame.sourceTimeMs,
         submitted: false,
-      });
+      };
+      record.candidates.push(current);
       // Keep only the best few looks. Sorting by quality and truncating is what
       // makes the buffer bounded no matter how long a vehicle stays in view.
       record.candidates.sort((a, b) => b.quality - a.quality);
@@ -277,6 +304,23 @@ export class PlateCapture {
         record.candidates.length,
         PLATE_LIMITS.framesPerTrack,
       );
+      // Only a crop from this very frame can be taken from the canvas in hand,
+      // so the current look must survive truncation even when older ones scored
+      // marginally better. Without this, a steady scene - where every look
+      // scores almost the same - fills the buffer with frames whose pixels are
+      // gone and never submits again, leaving the operator on "Analyzing…"
+      // permanently. Observed in production before this line existed.
+      if (!record.candidates.includes(current)) {
+        const worst = record.candidates.reduce(
+          (low, entry, index) =>
+            !entry.submitted && entry.quality < record.candidates[low]!.quality
+              ? index
+              : low,
+          0,
+        );
+        if (!record.candidates[worst]!.submitted)
+          record.candidates[worst] = current;
+      }
     }
     void this.pump(frame, canvas, remote);
   }

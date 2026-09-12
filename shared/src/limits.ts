@@ -90,6 +90,13 @@ export const PLATE_LIMITS = Object.freeze({
   /** Submission floor, independent of the analysis rate. */
   minIntervalMs: 220,
   requestTimeoutMs: 3000,
+  /**
+   * How long a track may stay "Analyzing…" before the current consensus is
+   * reported as final. A vehicle can leave, turn away, or simply never present
+   * a readable plate, and neither the operator nor a report may wait forever
+   * for a verdict that is not coming.
+   */
+  analysisDeadlineMs: 9000,
   /** Consensus needs genuine agreement, not one lucky read. */
   minSupportingFrames: 2,
   /** Below this the consensus is reported as unreadable rather than guessed. */

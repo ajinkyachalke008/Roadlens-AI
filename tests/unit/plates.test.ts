@@ -525,3 +525,86 @@ describe("B44 plate localisation for the selected vehicle", () => {
     expect(plates.state(1).plateBox).toBeNull();
   });
 });
+
+/**
+ * Two defects found by driving the deployed build against the live GPU worker,
+ * where the selected vehicle sat on "Analyzing…" indefinitely.
+ */
+describe("B45 plate analysis always reaches a verdict", () => {
+  let clock: number;
+  let plates: PlateCapture;
+  beforeEach(() => {
+    clock = 0;
+    plates = new PlateCapture(() => clock);
+    (globalThis as { document?: unknown }).document = {
+      createElement: () => fakeCanvas(8, 8),
+    };
+  });
+
+  /**
+   * The root cause: candidates were ranked by quality and truncated, but only a
+   * candidate from the current frame can be cropped from the canvas in hand. On
+   * a steady scene every look scores almost the same, so the buffer filled with
+   * frames whose pixels were gone and nothing was ever submitted again.
+   */
+  it("keeps submitting while a steady vehicle stays in view", async () => {
+    const remote = fakeRemote(() => ({
+      plateText: null,
+      plateConfidence: null,
+    }));
+    for (let seq = 1; seq <= 10; seq++) {
+      clock += 400;
+      plates.observe(analysed(seq, [track()]), fakeCanvas(), asRemote(remote));
+      await settle();
+      (plates as unknown as { lastSubmittedAt: number }).lastSubmittedAt =
+        -Infinity;
+    }
+    expect(remote.calls.length).toBeGreaterThanOrEqual(
+      PLATE_LIMITS.framesPerTrack,
+    );
+    expect(plates.state(1).status).toBe("unreadable");
+  });
+
+  it("settles to unreadable once the deadline passes", async () => {
+    const remote = fakeRemote(() => ({
+      plateText: null,
+      plateConfidence: null,
+    }));
+    plates.observe(analysed(1, [track()]), fakeCanvas(), asRemote(remote));
+    await settle();
+    // Still inside the deadline with budget left: a verdict would be premature.
+    expect(plates.state(1).status).toBe("pending");
+    clock += PLATE_LIMITS.analysisDeadlineMs;
+    expect(plates.state(1).status).toBe("unreadable");
+  });
+
+  it("reports a settled reading rather than the deadline verdict", async () => {
+    const remote = fakeRemote();
+    for (let seq = 1; seq <= PLATE_LIMITS.minSupportingFrames; seq++) {
+      clock += 400;
+      plates.observe(analysed(seq, [track()]), fakeCanvas(), asRemote(remote));
+      await settle();
+      (plates as unknown as { lastSubmittedAt: number }).lastSubmittedAt =
+        -Infinity;
+    }
+    clock += PLATE_LIMITS.analysisDeadlineMs;
+    expect(plates.state(1).status).toBe("read");
+    expect(plates.state(1).plateText).toBe("ABC1234");
+  });
+
+  it("never leaves a requested vehicle pending forever", async () => {
+    const remote = fakeRemote(
+      () => new PlateUnavailableError("plate_failed"),
+    );
+    plates.mode = "off";
+    plates.request(1);
+    plates.observe(
+      analysed(1, [track({ ruleState: "normal" })]),
+      fakeCanvas(),
+      asRemote(remote),
+    );
+    await settle();
+    clock += PLATE_LIMITS.analysisDeadlineMs;
+    expect(plates.state(1).status).toBe("unreadable");
+  });
+});

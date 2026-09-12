@@ -50,9 +50,11 @@ analysis-rate deltas, while the isolated interleaved benchmark measured -1.2%.
 The sign-changing results show no sustained local regression and do not
 establish physical-phone performance.
 
-Application commit `6ff75f237933722fe0d1ae9ae17311026d96c7a6` is pushed to
-public `main`. Vercel deployment `DsD7FGadsMDGbsWucydYRMP7qv4B` completed, and
-Render manual deployment `dep-daitkam7bikc73a1ij3g` is Live from that commit.
+Application commit `d2b419cbcebdaf41712f54bd4d7bea7ac5d8dc99` is pushed to
+public `main`. Vercel deployment `2yY2XynvTAQxajjeCiLewWTw1aYJ` completed and
+its deployed 390×844 Showcase acceptance passed 1/1 at 4.265 Hz off versus
+4.160 Hz on (-2.5%). Render manual deployment `dep-daitkam7bikc73a1ij3g` is
+Live from compatible relay commit `6ff75f237933722fe0d1ae9ae17311026d96c7a6`.
 The deployed relay advertises report protocol v2 over a real WSS owner
 handshake. The public paired-browser cloud smoke and a separate 390×844
 Showcase/report/viewer/download/cleanup acceptance each pass 1/1.

@@ -58,9 +58,12 @@ benchmark measured 63.83 Hz baseline versus 63.05 Hz interleaved (-1.2%), with
 accuracy and 99.10% coverage. These are local replay/public-data measurements;
 physical unreadable recovery and wrong-promotion rates remain unmeasured.
 
-Application commit `6ff75f237933722fe0d1ae9ae17311026d96c7a6` is pushed to
-`origin/main`. Vercel deployment `DsD7FGadsMDGbsWucydYRMP7qv4B` completed for
-that commit. Render manual deployment `dep-daitkam7bikc73a1ij3g` then built and
+Application commit `d2b419cbcebdaf41712f54bd4d7bea7ac5d8dc99` is pushed to
+`origin/main`. Vercel deployment `2yY2XynvTAQxajjeCiLewWTw1aYJ` completed for
+that commit and its deployed 390×844 Showcase acceptance passed 1/1 at
+4.265 Hz off versus 4.160 Hz on (-2.5%). Render manual deployment
+`dep-daitkam7bikc73a1ij3g` previously built the compatible relay from
+`6ff75f237933722fe0d1ae9ae17311026d96c7a6` and
 went Live in 48.9 s; a real WSS owner handshake reports `frameProtocol: 2` and
 `reportProtocol: 2`. The new frontend's downlevel adapter kept the brief
 frontend-new/relay-old interval compatible.

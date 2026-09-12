@@ -7,6 +7,8 @@ event primarily because a five-second timer elapsed. It arms at 4.0 s of
 advancing source time, selects only a real confirmed vehicle, and locks that
 identity in amber once readiness is already strong or an intermediate candidate
 has remained eligible for 800 ms. It then waits for useful real source pixels.
+After lock it never changes vehicles: losing that identity for 800 ms aborts
+the run and erases its pre-report crops rather than selecting another car.
 The normal readiness threshold is 0.68; bounded quality/trajectory fallbacks
 start at 0.56; per-target and overall waits are 6.5 s and 25 s. Readiness uses
 vehicle pixel size, measured crop sharpness/quality, centrality, framing,
@@ -38,7 +40,7 @@ already-open camera report and paired viewer. No pixels are synthesized, no
 confidence threshold is weakened, and no persistent storage, logging, cloud
 GPU or paid service was added.
 
-Local verification is green: typecheck, lint and production build; 295 unit,
+Local verification is green: typecheck, lint and production build; 296 unit,
 87 contract, 84 real-relay integration, 42 tracking, 11 browser-model, 14 E2E
 and 10 browser privacy scenarios; 95 worker tests / 139 subtests; and 1/1 real
 browser → relay → RTX CUDA GPU acceptance. Static privacy scans cover 55

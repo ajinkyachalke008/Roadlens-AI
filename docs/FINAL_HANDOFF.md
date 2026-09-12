@@ -16,6 +16,9 @@ single quality-aware lifecycle:
   → stop early on confirmation or settle at the bounded deadline
 ```
 
+A locked identity is never replaced. If it disappears for 800 ms before the
+report trigger, that run times out and its pre-report pixels are erased.
+
 The release uses an ideal 1920×1080/30 Showcase camera profile with a graceful
 1280×720 fallback and visible actual settings. It can score at most 16 distinct
 cadence-spaced looks over 4.8 s, retains/submits the top eight, admits OCR every
@@ -39,7 +42,7 @@ End Session, pagehide, source/runtime reset, timeout and confirmation clear the
 bounded raw-crop state; report-detail artifacts remain RAM-only and follow
 normal report/session eviction.
 
-All local release gates pass: 295 unit, 87 contract, 84 integration, 42
+All local release gates pass: 296 unit, 87 contract, 84 integration, 42
 tracking, 11 model, 14 E2E, 10 privacy-browser, 95 worker/139 worker-subtest,
 and 1 real CUDA browser integration test. Typecheck, lint, build and privacy
 source scans pass. Two short matched replays measured -1.9% and +6.7% traffic

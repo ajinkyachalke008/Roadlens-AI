@@ -384,13 +384,15 @@ export class ShowcaseController {
         frame.sourceTimeMs - history.lastSeenMs >= SHOWCASE_TARGET_LOST_MS
       ) {
         this.histories.delete(this.value.targetTrackId);
-        this.value.phase = "searching";
+        // Lock means lock: never hand a pre-report acquisition to a different
+        // vehicle. The camera observes targetTrackId clearing and destroys the
+        // abandoned target's temporary crops before this run settles.
+        this.value.phase = "timed_out";
         this.value.targetTrackId = null;
         this.value.targetLockedAtMs = null;
         this.value.targetBestReadiness = 0;
         this.value.currentReadiness = 0;
         this.value.growth = "unknown";
-        this.value.reselections++;
       }
       return null;
     }

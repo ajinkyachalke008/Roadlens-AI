@@ -289,6 +289,45 @@ describe("Showcase source-time state machine", () => {
     expect(controller.snapshot().targetTrackId).toBe(1);
   });
 
+  it("aborts instead of switching identities when a locked target is lost", () => {
+    const controller = new ShowcaseController();
+    controller.setEnabled(true);
+    controller.onFrame(analysed(0, []));
+    const moderate = new Map([[1, { sharpness: 5, quality: 0.5 }]]);
+    controller.onFrame(
+      analysed(SHOWCASE_ARMING_MS, [track({ bbox: [0.35, 0.3, 0.65, 0.65] })]),
+      new Set(),
+      moderate,
+    );
+    controller.onFrame(
+      analysed(SHOWCASE_ARMING_MS + 900, [
+        track({ bbox: [0.34, 0.29, 0.66, 0.66] }),
+      ]),
+      new Set(),
+      moderate,
+    );
+    expect(controller.snapshot()).toMatchObject({
+      phase: "acquiring",
+      targetTrackId: 1,
+    });
+    controller.onFrame(
+      analysed(SHOWCASE_ARMING_MS + 1_300, [track({ trackId: 9 })]),
+    );
+    expect(controller.snapshot()).toMatchObject({
+      phase: "acquiring",
+      targetTrackId: 1,
+    });
+    controller.onFrame(
+      analysed(SHOWCASE_ARMING_MS + 1_800, [track({ trackId: 9 })]),
+    );
+    expect(controller.snapshot()).toMatchObject({
+      phase: "timed_out",
+      targetTrackId: null,
+      reportId: null,
+      reselections: 0,
+    });
+  });
+
   it("can fire on a strong localized plate before OCR text exists", () => {
     const controller = new ShowcaseController();
     controller.setEnabled(true);

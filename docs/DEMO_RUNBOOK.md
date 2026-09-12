@@ -62,7 +62,8 @@ the camera tab's RAM.
 5. The controller waits for the real source crop to meet its 0.68 readiness
    threshold, or uses a bounded quality/trajectory fallback before the 6.5 s
    target wait expires. It never waits beyond the overall 25 s bound and never
-   switches tracks after a report exists.
+   switches tracks after lock; losing the target for 800 ms aborts that run and
+   clears its pre-report pixels.
 6. At the chosen frame, the target turns red with `TRAFFIC ALERT`, opens the
    existing Selected Vehicle card, and creates exactly one temporary report.
    In handheld mode speed remains unavailable; red means presentation target,

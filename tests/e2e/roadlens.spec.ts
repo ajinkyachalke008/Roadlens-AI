@@ -1038,7 +1038,8 @@ test("@frontend privacy: real local replay inference, observation and explicit d
       .poll(() => camera.page.evaluate(() => window.__roadlensTest.urls))
       .toBe(0);
     const trace = await boundedPrivacy(camera.page);
-    expect(trace.workersCreated).toBeGreaterThan(0);
+    if (initialProfile === "640") expect(trace.workersCreated).toBe(0);
+    else expect(trace.workersCreated).toBeGreaterThan(0);
     expect(trace.workersEnded).toBe(trace.workersCreated);
     expect(trace.urls).toBe(0);
     const viewerTrace = await boundedPrivacy(viewer.page);

@@ -4,6 +4,7 @@ import type { SessionStore } from "../session/store";
 import { csvExport, jsonExport, download } from "../session/export";
 import { displaySpeed, type SpeedUnit } from "./speedUnits";
 import { Drawer } from "./Drawer";
+import { SHOWCASE_TRIGGER_REASON } from "../showcase/constants";
 /**
  * One settled line of plate text for a report.
  *
@@ -32,6 +33,12 @@ export function plateLabel(report: Report) {
       return null;
   }
 }
+export const isShowcaseReport = (report: Report) =>
+  report.kind === "observation" &&
+  report.validityReasons.includes(SHOWCASE_TRIGGER_REASON);
+
+const speedReasons = (report: Report) =>
+  report.validityReasons.filter((reason) => reason !== SHOWCASE_TRIGGER_REASON);
 export function Reports({
   store,
   revision,
@@ -137,9 +144,11 @@ export function Reports({
                 </time>
                 <span>
                   <strong>
-                    {r.kind === "observation"
-                      ? "Observation"
-                      : "Speed review candidate"}
+                    {isShowcaseReport(r)
+                      ? "Traffic alert"
+                      : r.kind === "observation"
+                        ? "Observation"
+                        : "Speed review candidate"}
                   </strong>
                   <small>
                     {r.sourceMode === "replay_video" ? "Replay · " : ""}
@@ -172,9 +181,11 @@ export function Reports({
       {report && (
         <Drawer
           title={
-            report.kind === "observation"
-              ? "Observation"
-              : "Speed review candidate"
+            isShowcaseReport(report)
+              ? "Traffic alert"
+              : report.kind === "observation"
+                ? "Observation"
+                : "Speed review candidate"
           }
           onClose={() => setSelected(null)}
         >
@@ -209,6 +220,12 @@ export function Reports({
             <dd>
               {report.sourceMode === "replay_video" ? "Replay" : "Live camera"}
             </dd>
+            {isShowcaseReport(report) && (
+              <>
+                <dt>Trigger</dt>
+                <dd data-testid="report-trigger">Showcase trigger</dd>
+              </>
+            )}
             <dt>Vehicle</dt>
             <dd data-testid="report-vehicle">
               {/* Same identity form as the overlay and the selected card, so one
@@ -262,7 +279,7 @@ export function Reports({
             <dt>Validity</dt>
             <dd>
               {report.speedMps === null
-                ? report.validityReasons.join(", ") || "No qualified speed"
+                ? speedReasons(report).join(", ") || "No qualified speed"
                 : "Qualified estimate"}
             </dd>
             <dt>Entered demo limit</dt>

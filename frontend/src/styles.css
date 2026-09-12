@@ -18,6 +18,12 @@
   --accent: #d8f4a1;
   --dark: #14231b;
   --surface: #fff;
+  --showcase-accent: #d58a00;
+  --showcase-border: #b37800;
+  --showcase-surface: #fff1c7;
+  --showcase-ink: #5b3a00;
+  --showcase-muted: #654607;
+  --showcase-divider: #d6b66f;
 }
 * {
   box-sizing: border-box;
@@ -163,6 +169,44 @@ h2 {
   font-size: 11px;
   font-weight: 600;
   white-space: normal;
+}
+.showcase-toggle {
+  min-height: 44px;
+  padding: 6px 10px;
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  border-radius: 7px;
+  white-space: nowrap;
+  font-size: 11px;
+  background: var(--surface);
+}
+.showcase-toggle i {
+  width: 9px;
+  height: 9px;
+  border-radius: 50%;
+  border: 1px solid #78847b;
+  background: transparent;
+}
+.showcase-toggle small {
+  padding-left: 7px;
+  border-left: 1px solid var(--border);
+  color: var(--muted);
+  font-size: 10px;
+}
+.showcase-toggle.active {
+  border-color: var(--showcase-border);
+  background: var(--showcase-surface);
+  color: var(--showcase-ink);
+}
+.showcase-toggle.active i {
+  border-color: var(--showcase-border);
+  background: var(--showcase-accent);
+  box-shadow: 0 0 0 3px rgb(213 138 0 / 14%);
+}
+.showcase-toggle.active small {
+  border-color: var(--showcase-divider);
+  color: var(--showcase-muted);
 }
 .entry {
   padding: 85px 0 45px;
@@ -786,6 +830,10 @@ hr {
   .page-heading .badge {
     font-size: 10px;
     max-width: 140px;
+  }
+  .page-heading .showcase-toggle {
+    font-size: 10px;
+    padding-inline: 9px;
   }
   .stage-empty {
     height: 250px;

@@ -3,6 +3,7 @@ import { spawn, type ChildProcess } from "node:child_process";
 import { randomBytes } from "node:crypto";
 import { mkdir, writeFile } from "node:fs/promises";
 import { decodeGpuFrame, GpuResultSchema } from "../../shared/src/gpu";
+import { isPlateFrame } from "../../shared/src/plates";
 
 const origin = "http://127.0.0.1:10006";
 const secret = randomBytes(32).toString("base64url");
@@ -116,7 +117,9 @@ async function replay(page: Page) {
     });
     recorder.start();
     const timer = setInterval(() => ctx.drawImage(image, 0, 0, 810, 1080), 60);
-    await new Promise((resolve) => setTimeout(resolve, 2600));
+    // Keep source time continuous long enough to exercise Showcase's real
+    // five-second arming gate on the CUDA path.
+    await new Promise((resolve) => setTimeout(resolve, 9000));
     recorder.stop();
     await ended;
     clearInterval(timer);
@@ -170,6 +173,7 @@ test("real GPU camera → relay → CUDA → synchronized reports/viewer; fallba
     detections: number;
   }[] = [];
   const completedIds = new Set<string>();
+  let plateRequests = 0;
   const rates: { edge: number; values: Record<string, string | undefined> }[] =
     [];
   const gpuMessages: { type: string; state?: string; code?: string }[] = [];
@@ -177,7 +181,12 @@ test("real GPU camera → relay → CUDA → synchronized reports/viewer; fallba
     if (new URL(socket.url()).pathname !== "/gpu") return;
     socket.on("framesent", ({ payload }) => {
       if (typeof payload === "string") return;
-      const { header } = decodeGpuFrame(new Uint8Array(payload));
+      const bytes = new Uint8Array(payload);
+      if (isPlateFrame(bytes)) {
+        plateRequests++;
+        return;
+      }
+      const { header } = decodeGpuFrame(bytes);
       expect(submitted.size).toBeLessThan(2);
       submitted.set(header.frameId, {
         sent: performance.now(),
@@ -227,6 +236,9 @@ test("real GPU camera → relay → CUDA → synchronized reports/viewer; fallba
     "aria-label",
     /[1-9]\d* observed objects/,
   );
+  const showcase = page.getByRole("switch", { name: "Showcase mode" });
+  await showcase.click();
+  await expect(showcase).toHaveAttribute("data-phase", "arming");
   await expect
     .poll(() => observations.filter((r) => r.edge === 640).length)
     .toBeGreaterThanOrEqual(20);
@@ -239,9 +251,19 @@ test("real GPU camera → relay → CUDA → synchronized reports/viewer; fallba
       gpuMessages,
     }),
   ).toBe(true);
-  await page
-    .getByRole("button", { name: "Save observation", exact: true })
-    .click();
+  await expect(showcase).toHaveAttribute(
+    "data-phase",
+    /plate_pending|complete/,
+    { timeout: 20_000 },
+  );
+  await expect(page.locator(".report-row")).toHaveCount(1);
+  await expect(page.locator(".report-row strong")).toHaveText("Traffic alert");
+  await expect(page.getByTestId("selected-plate")).not.toHaveText(
+    "Not analyzed",
+  );
+  expect(plateRequests).toBeGreaterThan(0);
+  await showcase.click();
+  await expect(showcase).toHaveAttribute("data-phase", "off");
   const code = (await page.getByTestId("pairing-code").innerText()).trim();
   const viewer = await browser.newContext({ baseURL: origin });
   const view = await viewer.newPage();
@@ -257,6 +279,12 @@ test("real GPU camera → relay → CUDA → synchronized reports/viewer; fallba
     /pytorch_cuda|onnx_cuda|tensorrt/,
   );
   await view.locator(".report-row").first().click();
+  await expect(view.getByTestId("report-trigger")).toHaveText(
+    "Showcase trigger",
+  );
+  await expect(
+    view.getByAltText("Exact event frame retained by the camera"),
+  ).toBeVisible();
   await expect(
     view.getByRole("button", { name: "Mark noted", exact: true }).first(),
   ).toBeVisible();

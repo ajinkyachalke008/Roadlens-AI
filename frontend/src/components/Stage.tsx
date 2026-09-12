@@ -8,6 +8,7 @@ import {
   type ContentRect,
   type OverlayState,
 } from "../camera/overlay";
+import { SHOWCASE_TARGET_COLOR } from "../showcase/constants";
 export interface DisplayFrame {
   result: FrameResult;
   image: CanvasImageSource;
@@ -32,6 +33,13 @@ const colorFor = (ruleState: string) =>
       ? "#ffd89b"
       : "#a3edb8";
 
+export const overlayColor = (
+  ruleState: string,
+  selected = false,
+  showcase = false,
+) =>
+  showcase ? SHOWCASE_TARGET_COLOR : selected ? "#8ecbff" : colorFor(ruleState);
+
 /**
  * Overlay label.
  *
@@ -46,8 +54,9 @@ export const overlayLabel = (
   speedMps: number | null,
   speedUnit: SpeedUnit,
   overBy: number | null = null,
+  showcase = false,
 ) =>
-  `${className.toUpperCase()} · ID ${trackId}` +
+  `${showcase ? "TRAFFIC ALERT · " : ""}${className.toUpperCase()} · ID ${trackId}` +
   (speedMps !== null ? ` · ${displaySpeed(speedMps, speedUnit)}` : "") +
   (speedMps !== null && overBy !== null && overBy > 0
     ? ` · +${displaySpeed(overBy, speedUnit)}`
@@ -68,6 +77,7 @@ function drawBoxes(
   boxes: OverlayDrawBox[],
   speedUnit: SpeedUnit,
   selectedTrackId: number | null = null,
+  showcaseTrackId: number | null = null,
   plateBox: readonly [number, number, number, number] | null = null,
   overBy: (box: OverlayDrawBox) => number | null = () => null,
 ) {
@@ -82,10 +92,14 @@ function drawBoxes(
   for (const box of boxes) {
     const { x, y, width, height } = toContent(box.bbox, rect);
     const selected = box.trackId === selectedTrackId;
-    const color = selected ? "#8ecbff" : colorFor(box.ruleState);
+    const showcase = box.trackId === showcaseTrackId;
+    const color = overlayColor(box.ruleState, selected, showcase);
     ctx.globalAlpha = box.opacity ?? 1;
     ctx.strokeStyle = color;
-    ctx.lineWidth = Math.max(selected ? 3 : 1.5, rect.width / 450);
+    ctx.lineWidth = Math.max(
+      showcase ? 4 : selected ? 3 : 1.5,
+      rect.width / 450,
+    );
     ctx.strokeRect(x, y, width, height);
     ctx.lineWidth = Math.max(1.5, rect.width / 450);
     const label = overlayLabel(
@@ -94,6 +108,7 @@ function drawBoxes(
       box.speedMps,
       speedUnit,
       overBy(box),
+      showcase,
     );
     const labelHeight = Math.max(20, rect.width / 40);
     const textWidth = ctx.measureText(label).width + 12;
@@ -150,6 +165,7 @@ export function Stage({
   smoothing = true,
   telemetry,
   selectedTrackId = null,
+  showcaseTrackId = null,
   onSelect,
   plateBox = null,
   speedLimitMps = null,
@@ -163,6 +179,8 @@ export function Stage({
   smoothing?: boolean;
   telemetry?: RefObject<OverlayTelemetry>;
   selectedTrackId?: number | null;
+  /** The one real track selected by Showcase; visually distinct from selection. */
+  showcaseTrackId?: number | null;
   /** Tapping a box selects that vehicle; tapping empty space clears. */
   onSelect?: (trackId: number | null) => void;
   plateBox?: readonly [number, number, number, number] | null;
@@ -175,6 +193,8 @@ export function Stage({
   // The render loop reads these without being restarted by a selection change.
   const selection = useRef(selectedTrackId);
   selection.current = selectedTrackId;
+  const showcase = useRef(showcaseTrackId);
+  showcase.current = showcaseTrackId;
   const plate = useRef(plateBox);
   plate.current = plateBox;
   const limit = useRef(speedLimitMps);
@@ -251,6 +271,7 @@ export function Stage({
         state.boxes,
         speedUnit,
         selection.current,
+        showcase.current,
         plate.current,
         (box) =>
           box.speedMps !== null && limit.current !== null
@@ -287,6 +308,7 @@ export function Stage({
       frame.result.tracks.filter((t) => t.observed),
       speedUnit,
       frame.result.selectedTrackId ?? null,
+      null,
     );
   }, [frame, speedUnit, live]);
   return (

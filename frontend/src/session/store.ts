@@ -7,6 +7,7 @@ import {
   type FrameResult,
   type CameraPolicy,
 } from "../../../shared/src/schemas";
+import { SHOWCASE_TRIGGER_REASON } from "../showcase/constants";
 /** The optional plate half of a report, always supplied or omitted together. */
 export type PlateFields = Pick<
   Report,
@@ -127,6 +128,7 @@ export class SessionStore {
     reportId: string = crypto.randomUUID(),
     summary?: Report["evidenceSummary"],
     plate?: PlateFields,
+    trigger?: "showcase",
   ) {
     const old = this.reports.get(reportId);
     if (old) return structuredClone(old);
@@ -145,6 +147,13 @@ export class SessionStore {
     const now = new Date().toISOString();
     const evidenceId =
       blob && blob.size <= LIMITS.evidenceBytes ? crypto.randomUUID() : null;
+    const validityReasons = !track
+      ? ["no_observed_object"]
+      : track.speedReason
+        ? [track.speedReason]
+        : [];
+    if (trigger === "showcase" && kind === "observation")
+      validityReasons.push(SHOWCASE_TRIGGER_REASON);
     const report: Report = {
       reportId,
       revision: 0,
@@ -165,11 +174,7 @@ export class SessionStore {
       modelSha256: frame.modelSha256,
       detectorProfile: frame.detectorProfile,
       trackerVersion: frame.trackerVersion,
-      validityReasons: !track
-        ? ["no_observed_object"]
-        : track.speedReason
-          ? [track.speedReason]
-          : [],
+      validityReasons,
       evidenceSummary: summary ?? {
         trajectory: [],
         residualM: null,
@@ -190,6 +195,65 @@ export class SessionStore {
     this.onReport(report);
     return report;
   }
+
+  /**
+   * Promote the one Showcase observation when its locked track later becomes a
+   * genuine speed candidate. The report identity is retained, its facts and
+   * bounded evidence move to the qualifying frame, and viewers receive a normal
+   * higher-revision upsert instead of a confusing duplicate.
+   */
+  upgradeToSpeedCandidate(
+    reportId: string,
+    frame: FrameResult,
+    policy: CameraPolicy,
+    trackId: number,
+    summary: Report["evidenceSummary"],
+    blob?: Blob,
+    plate?: PlateFields,
+  ) {
+    const old = this.reports.get(reportId);
+    if (!old || old.kind === "speed_candidate") return false;
+    FrameSchema.parse(frame);
+    PolicySchema.parse(policy);
+    if (policy.version !== frame.policyVersion)
+      throw new Error("Report policy does not match the analyzed frame");
+    const track = frame.tracks.find(
+      (candidate) => candidate.trackId === trackId && candidate.observed,
+    );
+    if (!track || track.speedMps === null || frame.calibrationVersion === null)
+      throw new Error("A speed candidate requires a qualified observed track");
+    if (blob && old.evidenceId) this.retain(old.evidenceId, blob);
+    const next: Report = {
+      ...old,
+      revision: old.revision + 1,
+      sourceId: frame.sourceId,
+      captureEpoch: frame.captureEpoch,
+      frameId: frame.frameId,
+      trackId,
+      sourceMode: frame.sourceMode,
+      sourceTimeMs: frame.sourceTimeMs,
+      capturedAtIso: frame.capturedAtIso,
+      kind: "speed_candidate",
+      className: track.className,
+      score: track.score,
+      speedMps: track.speedMps,
+      policy: structuredClone(policy),
+      calibrationVersion: frame.calibrationVersion,
+      modelId: frame.modelId,
+      modelSha256: frame.modelSha256,
+      detectorProfile: frame.detectorProfile,
+      trackerVersion: frame.trackerVersion,
+      validityReasons: [],
+      evidenceSummary: structuredClone(summary),
+      ...(plate ?? {}),
+      updatedAt: new Date().toISOString(),
+    };
+    ReportSchema.parse(next);
+    this.reports.set(reportId, next);
+    this.onChange();
+    this.onReport(next);
+    return true;
+  }
   review(id: string, revision: number, review: Report["review"]) {
     const old = this.reports.get(id);
     if (!old) return "report_unavailable" as const;
@@ -207,11 +271,11 @@ export class SessionStore {
   snapshot() {
     return [...this.reports.values()].map((r) => structuredClone(r));
   }
-  episodeId(key: string) {
+  episodeId(key: string, preferredId?: string) {
     const existing = this.episodes.get(key);
     if (existing) return existing;
     if (this.episodes.size >= 1000) return null;
-    const id = crypto.randomUUID();
+    const id = preferredId ?? crypto.randomUUID();
     this.episodes.set(key, id);
     return id;
   }

@@ -158,6 +158,129 @@ describe("B22/B24/B46 RAM report and evidence stores (synthetic metadata)", () =
     expect(store.reports.size).toBe(1);
     expect(store.evidenceCount).toBe(0);
   });
+  it("retains one bounded truthful Showcase observation and publishes it once", () => {
+    const store = new SessionStore(),
+      published = vi.fn(),
+      f = frame(30);
+    f.sourceTimeMs = 6_123;
+    f.tracks[0] = {
+      ...f.tracks[0]!,
+      trackId: 8,
+      className: "truck",
+      score: 0.91,
+      trackState: "confirmed",
+      observedMs: 1_400,
+    };
+    store.onReport = published;
+    const saved = store.save(
+      f,
+      policy(),
+      new Blob(["showcase-frame"]),
+      "observation",
+      8,
+      uuid(900),
+      undefined,
+      {
+        plateStatus: "unavailable",
+        plateText: null,
+        plateConfidence: null,
+        plateSupportingFrames: 0,
+        plateDetectorConfidence: null,
+      },
+      "showcase",
+    );
+    expect(saved).toMatchObject({
+      reportId: uuid(900),
+      frameId: f.frameId,
+      captureEpoch: f.captureEpoch,
+      sourceTimeMs: 6_123,
+      trackId: 8,
+      className: "truck",
+      score: 0.91,
+      kind: "observation",
+      speedMps: null,
+      validityReasons: ["not_calibrated", "showcase_trigger"],
+      plateStatus: "unavailable",
+      plateText: null,
+      evidenceState: "available",
+    });
+    expect(store.reports.size).toBe(1);
+    expect(store.evidenceCount).toBe(1);
+    expect(published).toHaveBeenCalledTimes(1);
+  });
+  it("upgrades the same Showcase report to a genuine speed candidate without a duplicate", () => {
+    const store = new SessionStore(),
+      published = vi.fn(),
+      reportId = uuid(901),
+      first = frame(31);
+    first.tracks[0] = {
+      ...first.tracks[0]!,
+      trackState: "confirmed",
+      observedMs: 1_000,
+    };
+    store.onReport = published;
+    store.save(
+      first,
+      policy(),
+      new Blob(["initial"]),
+      "observation",
+      1,
+      reportId,
+      undefined,
+      {
+        plateStatus: "pending",
+        plateText: null,
+        plateConfidence: null,
+        plateSupportingFrames: 0,
+        plateDetectorConfidence: null,
+      },
+      "showcase",
+    );
+    const qualified = frame(32);
+    qualified.calibrationVersion = uuid(700);
+    qualified.tracks[0] = {
+      ...qualified.tracks[0]!,
+      trackState: "confirmed",
+      observedMs: 2_000,
+      speedMps: 14.2,
+      speedStatus: "valid_estimate",
+      speedReason: null,
+      ruleState: "candidate",
+    };
+    const summary = {
+      trajectory: [
+        [qualified.sourceTimeMs - 200, 1, 2],
+        [qualified.sourceTimeMs, 2, 3],
+      ] as [number, number, number][],
+      residualM: 0.2,
+      coverageMs: 200,
+    };
+    expect(
+      store.upgradeToSpeedCandidate(
+        reportId,
+        qualified,
+        policy(),
+        1,
+        summary,
+        new Blob(["qualified"]),
+      ),
+    ).toBe(true);
+    expect(store.snapshot()).toHaveLength(1);
+    expect(store.reports.get(reportId)).toMatchObject({
+      reportId,
+      revision: 1,
+      frameId: qualified.frameId,
+      kind: "speed_candidate",
+      speedMps: 14.2,
+      calibrationVersion: uuid(700),
+      validityReasons: [],
+      evidenceSummary: summary,
+    });
+    expect(store.evidenceCount).toBe(1);
+    expect(published).toHaveBeenCalledTimes(2);
+    expect(store.episodeId("same-real-episode", reportId)).toBe(reportId);
+    expect(store.episodeId("same-real-episode")).toBe(reportId);
+  });
   it("caps reports by FIFO creation and review updates cannot refresh their lifetime", () => {
     const store = new SessionStore();
     for (let i = 1; i <= 200; i++) store.upsert(report(i));

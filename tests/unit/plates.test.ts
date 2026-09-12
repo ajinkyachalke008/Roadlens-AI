@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, it } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 import { PLATE_LIMITS } from "../../shared/src/limits";
 import {
   plateConsensus,
@@ -411,6 +411,17 @@ describe("B43 bounded event-driven plate capture", () => {
     plates.observe(analysed(1, [track()]), fakeCanvas(), null);
     await settle();
     expect(plates.state(1).status).toBe("idle");
+  });
+  it("resolves an explicit browser-fallback request as unavailable without text", () => {
+    const changed = vi.fn();
+    plates.onChange = changed;
+    expect(plates.request(1, false)).toBe(true);
+    expect(plates.state(1)).toMatchObject({
+      status: "unavailable",
+      plateText: null,
+      supportingFrames: 0,
+    });
+    expect(changed).toHaveBeenCalledTimes(1);
   });
   it("gives a track its frame budget back when a request is refused", async () => {
     const remote = fakeRemote(() => new PlateUnavailableError("busy"));

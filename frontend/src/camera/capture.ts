@@ -34,6 +34,8 @@ import {
 import type { DetectionResult } from "../inference/types";
 export interface CompletedFrame {
   result: FrameResult;
+  /** Internal tracker fact; never serialized or sent through the relay. */
+  ambiguousTrackIds: ReadonlySet<number>;
   policy: CameraPolicy;
   canvas: HTMLCanvasElement;
   jpeg: Blob;
@@ -846,6 +848,11 @@ export class CameraCapture {
       }
       const frame: CompletedFrame = {
         result,
+        ambiguousTrackIds: new Set(
+          tracked
+            .filter((track) => track.ambiguous)
+            .map((track) => track.trackId),
+        ),
         policy,
         canvas,
         jpeg: jpeg.blob,

@@ -1,5 +1,9 @@
 import { describe, expect, it } from "vitest";
-import { hitTest, overlayLabel } from "../../frontend/src/components/Stage";
+import {
+  hitTest,
+  overlayColor,
+  overlayLabel,
+} from "../../frontend/src/components/Stage";
 import { estimateSpeed } from "../../frontend/src/geometry/speed";
 import type { TrackedObject } from "../../frontend/src/tracking/tracker";
 import type { Calibration } from "../../frontend/src/geometry/calibration";
@@ -71,6 +75,21 @@ describe("overlay label", () => {
     for (const unit of ["mph", "km/h"] as const)
       expect(overlayLabel("car", 3, null, unit)).not.toMatch(/mph|km\/h/);
     expect(overlayLabel("car", 3, null, "km/h")).toBe("CAR · ID 3");
+  });
+  it("truthfully labels a Showcase target without inventing speed", () => {
+    expect(overlayLabel("truck", 7, null, "mph", null, true)).toBe(
+      "TRAFFIC ALERT · TRUCK · ID 7",
+    );
+  });
+});
+
+describe("overlay color", () => {
+  it("keeps normal rules unchanged and reserves red for the Showcase identity", () => {
+    expect(overlayColor("normal")).toBe("#a3edb8");
+    expect(overlayColor("candidate")).toBe("#ffbf69");
+    expect(overlayColor("normal", true)).toBe("#8ecbff");
+    expect(overlayColor("normal", false, true)).toBe("#ff4d4f");
+    expect(overlayColor("candidate", true, true)).toBe("#ff4d4f");
   });
 });
 

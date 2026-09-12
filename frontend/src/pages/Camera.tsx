@@ -40,6 +40,11 @@ import { PlateCapture, type PlateCaptureMode } from "../plates/capture";
 import { plateFields } from "../plates/report";
 import { SelectedVehicle } from "../components/SelectedVehicle";
 import { legacyFrame } from "../transport/legacyFrame";
+import {
+  ShowcaseController,
+  showcaseStatusLabel,
+  type ShowcaseState,
+} from "../showcase/controller";
 export default function Camera() {
   const video = useRef<HTMLVideoElement>(null);
   const capture = useRef<CameraCapture | null>(null);
@@ -73,6 +78,10 @@ export default function Camera() {
    * viewer can highlight the same box.
    */
   const [selectedTrackId, setSelectedTrackId] = useState<number | null>(null);
+  const [showcase] = useState(() => new ShowcaseController());
+  const [showcaseState, setShowcaseState] = useState<ShowcaseState>(() =>
+    showcase.snapshot(),
+  );
   /** Reports whose plate consensus is still being followed, by track. */
   const plateReports = useRef(new Map<number, string>()).current;
   const [validationRevision, setValidationRevision] = useState(0);
@@ -269,12 +278,15 @@ export default function Camera() {
       // only from onFrame would leave the final reading stranded on a report
       // that stays "Analyzing…" forever.
       flushPlates();
+      syncShowcasePlate();
       setPlateRevision((value) => value + 1);
     };
     c.onReset = () => {
       setFrame(null);
+      settleInterruptedShowcasePlate();
       plates.reset();
       plateReports.clear();
+      setShowcaseState(showcase.resetContinuity());
       // Track identities do not survive an epoch, so a selection made in the
       // previous one cannot mean anything in this one.
       setSelectedTrackId(null);
@@ -323,13 +335,46 @@ export default function Camera() {
       );
       plates.observe(completed.result, completed.canvas, c.remote);
       flushPlates();
+      handleShowcaseFrame(completed);
       for (const candidate of completed.candidates) {
-        const id = store.episodeId(candidate.episodeKey);
-        if (!id || store.reports.has(id)) continue;
+        const activeShowcase = showcase.snapshot();
+        const showcaseReportId =
+          activeShowcase.targetTrackId === candidate.trackId
+            ? activeShowcase.reportId
+            : null;
+        const id = store.episodeId(
+          candidate.episodeKey,
+          showcaseReportId ?? undefined,
+        );
+        if (!id) continue;
         // A speed candidate is exactly the qualified workflow plate reading is
         // for, so ask for this vehicle explicitly and follow its consensus.
         plates.request(candidate.trackId);
         if (plateReports.size < 32) plateReports.set(candidate.trackId, id);
+        const plate = plateFields(plates.state(candidate.trackId)) ?? undefined;
+        if (
+          showcaseReportId === id &&
+          store.reports.get(id)?.kind === "observation"
+        ) {
+          store.upgradeToSpeedCandidate(
+            id,
+            completed.result,
+            completed.policy,
+            candidate.trackId,
+            {
+              trajectory: candidate.estimate.trajectory.map((p) => [
+                p.sourceTimeMs,
+                ...p.point,
+              ]),
+              residualM: candidate.estimate.residualM,
+              coverageMs: candidate.estimate.coverageMs,
+            },
+            completed.jpeg,
+            plate,
+          );
+          continue;
+        }
+        if (store.reports.has(id)) continue;
         store.save(
           completed.result,
           completed.policy,
@@ -345,7 +390,7 @@ export default function Camera() {
             residualM: candidate.estimate.residualM,
             coverageMs: candidate.estimate.coverageMs,
           },
-          plateFields(plates.state(candidate.trackId)) ?? undefined,
+          plate,
         );
       }
       const client = relay.current;
@@ -417,6 +462,7 @@ export default function Camera() {
       store.clear();
       plates.reset();
       plateReports.clear();
+      setShowcaseState(showcase.setEnabled(false));
       setFrame(null);
       setRoom(null);
       setStatus("Ended");
@@ -489,6 +535,93 @@ export default function Camera() {
       if (plate) store.applyPlate(reportId, plate);
     }
   }).current;
+  function settleInterruptedShowcasePlate() {
+    const current = showcase.snapshot();
+    if (current.reportId === null) return;
+    const report = store.reports.get(current.reportId);
+    if (report?.plateStatus !== "pending") return;
+    store.applyPlate(current.reportId, {
+      plateStatus: "unreadable",
+      plateText: null,
+      plateConfidence: null,
+      plateSupportingFrames: report.plateSupportingFrames ?? 0,
+      plateDetectorConfidence: report.plateDetectorConfidence ?? null,
+    });
+  }
+  function syncShowcasePlate() {
+    const current = showcase.snapshot();
+    if (current.targetTrackId === null || current.reportId === null) return;
+    setShowcaseState(
+      showcase.updatePlate(plates.state(current.targetTrackId).status),
+    );
+  }
+  function handleShowcaseFrame(completed: CompletedFrame) {
+    if (!showcase.acceptsFrames) return;
+    const beforePhase = showcase.phase;
+    const target = showcase.onFrame(
+      completed.result,
+      completed.ambiguousTrackIds,
+    );
+    if (!target) {
+      if (beforePhase !== showcase.phase) setShowcaseState(showcase.snapshot());
+      return;
+    }
+    setSelectedTrackId(target.trackId);
+    if (capture.current) capture.current.selectedTrackId = target.trackId;
+    try {
+      const plateAccepted = plates.request(
+        target.trackId,
+        !!capture.current?.remote?.plateAvailable,
+      );
+      const plate = plateAccepted
+        ? (plateFields(plates.state(target.trackId)) ?? undefined)
+        : {
+            plateStatus: "unavailable" as const,
+            plateText: null,
+            plateConfidence: null,
+            plateSupportingFrames: 0,
+            plateDetectorConfidence: null,
+          };
+      const speedCandidate = completed.candidates.find(
+        (candidate) => candidate.trackId === target.trackId,
+      );
+      const reportId = speedCandidate
+        ? (store.episodeId(speedCandidate.episodeKey) ?? crypto.randomUUID())
+        : crypto.randomUUID();
+      if (plateReports.size < 32) plateReports.set(target.trackId, reportId);
+      const report = store.save(
+        completed.result,
+        completed.policy,
+        completed.jpeg,
+        speedCandidate ? "speed_candidate" : "observation",
+        target.trackId,
+        reportId,
+        speedCandidate
+          ? {
+              trajectory: speedCandidate.estimate.trajectory.map((point) => [
+                point.sourceTimeMs,
+                ...point.point,
+              ]),
+              residualM: speedCandidate.estimate.residualM,
+              coverageMs: speedCandidate.estimate.coverageMs,
+            }
+          : undefined,
+        plate,
+        speedCandidate ? undefined : "showcase",
+      );
+      setShowcaseState(
+        showcase.markReportCreated(
+          report.reportId,
+          report.plateStatus ?? "unavailable",
+        ),
+      );
+    } catch (cause) {
+      const message =
+        cause instanceof Error ? cause.message : "Showcase report failed";
+      setShowcaseState(showcase.fail(message));
+      setError(message);
+    }
+  }
   async function start(file?: File | null) {
     setError("");
     const life = lifecycle.current;
@@ -750,6 +883,26 @@ export default function Camera() {
           >
             {modeLabel}
           </span>
+          <button
+            type="button"
+            role="switch"
+            aria-label="Showcase mode"
+            aria-checked={showcaseState.enabled}
+            className={`showcase-toggle${showcaseState.enabled ? " active" : ""}`}
+            data-testid="showcase-toggle"
+            data-phase={showcaseState.phase}
+            title="Select one real confirmed vehicle and create one temporary traffic event"
+            onClick={() => {
+              const enabling = !showcaseState.enabled;
+              const target = showcaseState.targetTrackId;
+              setShowcaseState(showcase.setEnabled(enabling));
+              if (!enabling && target === selectedTrackId) select(null);
+            }}
+          >
+            <i aria-hidden="true" />
+            <span>Showcase</span>
+            <small>{showcaseStatusLabel(showcaseState)}</small>
+          </button>
         </div>
       </div>
       <Stage
@@ -761,6 +914,7 @@ export default function Camera() {
         smoothing={smoothing}
         telemetry={overlay}
         selectedTrackId={selectedTrackId}
+        showcaseTrackId={showcaseState.targetTrackId}
         onSelect={select}
         plateBox={selectedPlate?.plateBox ?? null}
         speedLimitMps={capture.current?.policy.speedLimitMps ?? null}
@@ -1462,6 +1616,7 @@ export default function Camera() {
             className="primary"
             onClick={() => {
               capture.current?.end();
+              setShowcaseState(showcase.setEnabled(false));
               store.clear();
               plates.reset();
               plateReports.clear();

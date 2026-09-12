@@ -87,6 +87,7 @@ type Trace = {
   workersEnded: number;
   tracksStopped: number;
   urls: number;
+  strokeColors: string[];
   drawings: {
     frameId: string;
     width: number;
@@ -115,6 +116,7 @@ async function instrument(context: BrowserContext) {
       workersEnded: 0,
       tracksStopped: 0,
       urls: 0,
+      strokeColors: [],
       drawings: [],
     };
     window.__roadlensTest = trace;
@@ -212,7 +214,11 @@ async function instrument(context: BrowserContext) {
     });
     const stroke = CanvasRenderingContext2D.prototype.strokeRect;
     CanvasRenderingContext2D.prototype.strokeRect = function (...args) {
-      if (this.canvas.dataset.frameId) trace.drawings.at(-1)?.boxes.push(args);
+      if (this.canvas.dataset.frameId) {
+        trace.drawings.at(-1)?.boxes.push(args);
+        trace.strokeColors.push(String(this.strokeStyle));
+        if (trace.strokeColors.length > 256) trace.strokeColors.shift();
+      }
       stroke.apply(this, args);
     };
   });
@@ -362,7 +368,10 @@ test.beforeAll(async ({ browser }) => {
     const timer = setInterval(() => {
       ctx.drawImage(image, 0, 0, canvas.width, canvas.height);
     }, 60);
-    await new Promise((resolve) => setTimeout(resolve, 2200));
+    // Long enough for the real Showcase source-time arming window. The source
+    // remains a permitted photograph rendered through the actual detector and
+    // tracker; no detection metadata is recorded in this fixture.
+    await new Promise((resolve) => setTimeout(resolve, 16_200));
     recorder.stop();
     await stopped;
     clearInterval(timer);
@@ -1689,5 +1698,211 @@ test("Vehicle intelligence: tapping a vehicle opens its detail, and handheld spe
     await expect(camera.page.getByLabel("Selected vehicle")).toHaveCount(0);
   } finally {
     await camera.context.close();
+  }
+});
+
+test("Showcase: accessible mobile toggle drives one real replay event and viewer report", async ({
+  browser,
+}, testInfo) => {
+  const camera = await pageFor(browser, { width: 390, height: 844 });
+  const viewer = await pageFor(browser);
+  try {
+    await reserveRoomWindow(1);
+    await camera.page.goto("/camera");
+    const toggle = camera.page.getByRole("switch", {
+      name: "Showcase mode",
+    });
+    await expect(toggle).toHaveAttribute("aria-checked", "false");
+    await expect(toggle).toHaveAttribute("data-phase", "off");
+    const toggleBox = await toggle.boundingBox();
+    expect(toggleBox).not.toBeNull();
+    expect(toggleBox!.height).toBeGreaterThanOrEqual(44);
+    expect(
+      await camera.page.evaluate(
+        () => document.documentElement.scrollWidth <= window.innerWidth,
+      ),
+    ).toBe(true);
+    await camera.page.emulateMedia({ reducedMotion: "reduce" });
+    expect(
+      await toggle.evaluate(
+        (element) => getComputedStyle(element).transitionDuration,
+      ),
+    ).toBe("0s");
+    for (const viewport of [
+      { width: 375, height: 812 },
+      { width: 844, height: 390 },
+      { width: 390, height: 844 },
+    ]) {
+      await camera.page.setViewportSize(viewport);
+      expect(
+        await camera.page.evaluate(
+          () => document.documentElement.scrollWidth <= window.innerWidth,
+        ),
+      ).toBe(true);
+      await expect(toggle).toBeVisible();
+    }
+
+    // Keep this acceptance path independent of whether an operator GPU happens
+    // to be leased. Browser fallback is a real detector and must resolve the
+    // plate field honestly as unavailable.
+    await camera.page.getByRole("button", { name: "Settings" }).click();
+    await camera.page.getByLabel("Prefer available GPU on start").uncheck();
+    await camera.page.getByRole("button", { name: "Close drawer" }).click();
+
+    await toggle.focus();
+    await camera.page.keyboard.press("Space");
+    await expect(toggle).toHaveAttribute("aria-checked", "true");
+    await expect(toggle).toHaveAttribute("data-phase", "arming");
+    await camera.page.keyboard.press("Space");
+    await expect(toggle).toHaveAttribute("aria-checked", "false");
+
+    await camera.page
+      .getByRole("button", { name: "Share camera", exact: true })
+      .click();
+    const code = await camera.page.getByTestId("pairing-code").innerText();
+    await connect(viewer.page, code);
+    await startReplay(camera.page, false);
+
+    // Measure after the same five-second warm interval used for the enabled
+    // phase, so media startup does not make the OFF sample artificially high.
+    await camera.page.waitForTimeout(5_000);
+    await camera.page.getByRole("button", { name: "Settings" }).click();
+    const performance = camera.page.getByTestId("performance-summary");
+    await expect
+      .poll(
+        async () => Number(await performance.getAttribute("data-analysis-hz")),
+        { timeout: 15_000 },
+      )
+      .toBeGreaterThan(0);
+    const offMetrics = {
+      analysisHz: Number(await performance.getAttribute("data-analysis-hz")),
+      overlayAgeMs: Number(
+        await performance.getAttribute("data-overlay-age-ms"),
+      ),
+    };
+    await camera.page.getByRole("button", { name: "Close drawer" }).click();
+
+    await toggle.click();
+    await expect(toggle).toHaveAttribute("data-phase", "arming");
+
+    // The source-time state machine cannot report during its first five
+    // seconds, even though the permitted replay already contains a real bus.
+    const startedAt = Date.now();
+    await camera.page.waitForTimeout(2_000);
+    await expect(camera.page.locator(".report-row")).toHaveCount(0);
+    await expect(toggle).toHaveAttribute("data-phase", "arming");
+
+    await expect(toggle).toHaveAttribute("data-phase", "complete", {
+      timeout: 35_000,
+    });
+    expect(Date.now() - startedAt).toBeGreaterThanOrEqual(4_500);
+    await expect(camera.page.locator(".report-row")).toHaveCount(1);
+    await expect(viewer.page.locator(".report-row")).toHaveCount(1);
+    await expect(camera.page.locator(".report-row strong")).toHaveText(
+      "Traffic alert",
+    );
+    await expect(camera.page.getByLabel("Selected vehicle")).toBeVisible();
+    await camera.page.screenshot({
+      path: testInfo.outputPath("showcase-mobile-camera.png"),
+      fullPage: true,
+    });
+
+    await camera.page.getByRole("button", { name: "Settings" }).click();
+    const onMetrics = {
+      analysisHz: Number(await performance.getAttribute("data-analysis-hz")),
+      overlayAgeMs: Number(
+        await performance.getAttribute("data-overlay-age-ms"),
+      ),
+    };
+    expect(onMetrics.analysisHz).toBeGreaterThan(0);
+    expect(onMetrics.overlayAgeMs).toBeLessThan(2_000);
+    const metrics = { off: offMetrics, on: onMetrics };
+    console.log(`[showcase-performance] ${JSON.stringify(metrics)}`);
+    await testInfo.attach("showcase-performance.json", {
+      body: JSON.stringify(metrics, null, 2),
+      contentType: "application/json",
+    });
+    await camera.page.getByRole("button", { name: "Close drawer" }).click();
+
+    const exported = await exportReports(camera.page);
+    expect(exported.reports).toHaveLength(1);
+    const report = exported.reports[0]!;
+    expect(["car", "motorcycle", "bus", "truck"]).toContain(report.className);
+    expect(report).toMatchObject({
+      sourceMode: "replay_video",
+      kind: "observation",
+      speedMps: null,
+      plateStatus: "unavailable",
+      plateText: null,
+      evidenceState: "available",
+    });
+    expect(report.trackId).not.toBeNull();
+    expect(report.validityReasons).toContain("showcase_trigger");
+
+    await camera.page.locator(".report-row").click();
+    await expect(camera.page.getByTestId("report-trigger")).toHaveText(
+      "Showcase trigger",
+    );
+    await expect(
+      camera.page.getByAltText("Exact event frame retained by the camera"),
+    ).toBeVisible();
+    await camera.page.getByRole("button", { name: "Close drawer" }).click();
+    await viewer.page.locator(".report-row").click();
+    await expect(viewer.page.getByTestId("report-trigger")).toHaveText(
+      "Showcase trigger",
+    );
+    await expect(
+      viewer.page.getByAltText("Exact event frame retained by the camera"),
+    ).toBeVisible();
+    await viewer.page.getByRole("button", { name: "Close drawer" }).click();
+
+    await camera.page.waitForTimeout(1_000);
+    const recentColors = await camera.page.evaluate(() => [
+      ...new Set(window.__roadlensTest.strokeColors),
+    ]);
+    expect(recentColors).toContain("#ff4d4f");
+    await camera.page.waitForTimeout(1_500);
+    await expect(camera.page.locator(".report-row")).toHaveCount(1);
+
+    // Turning the mode off clears its target but leaves the already-created
+    // session report alone. A new ON starts a fresh, explicit run.
+    await toggle.click();
+    await expect(toggle).toHaveAttribute("aria-checked", "false");
+    await expect(toggle).toHaveAttribute("data-phase", "off");
+    await expect(camera.page.getByLabel("Selected vehicle")).toHaveCount(0);
+    await toggle.click();
+    await expect(toggle).toHaveAttribute("data-phase", "arming");
+
+    await camera.page
+      .getByRole("button", { name: "End session", exact: true })
+      .click();
+    await camera.page
+      .getByRole("button", { name: "End and clear session", exact: true })
+      .click();
+    await expect(toggle).toHaveAttribute("aria-checked", "false");
+    await expect(toggle).toHaveAttribute("data-phase", "off");
+    await expect(camera.page.locator(".report-row")).toHaveCount(0);
+    await expect(viewer.page.locator(".report-row")).toHaveCount(0);
+
+    await toggle.click();
+    await camera.page.evaluate(() => {
+      window.dispatchEvent(
+        new PageTransitionEvent("pagehide", { persisted: true }),
+      );
+      window.dispatchEvent(
+        new PageTransitionEvent("pageshow", { persisted: true }),
+      );
+    });
+    await expect(toggle).toHaveAttribute("aria-checked", "false");
+    await camera.page.reload();
+    await expect(
+      camera.page.getByRole("switch", { name: "Showcase mode" }),
+    ).toHaveAttribute("aria-checked", "false");
+    expect((await boundedPrivacy(camera.page)).writes).toEqual([]);
+    expect((await boundedPrivacy(viewer.page)).writes).toEqual([]);
+    expect([...camera.errors, ...viewer.errors]).toEqual([]);
+  } finally {
+    await camera.context.close();
+    await viewer.context.close();
   }
 });

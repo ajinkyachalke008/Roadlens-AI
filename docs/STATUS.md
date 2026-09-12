@@ -1,5 +1,73 @@
 # RoadLens release status
 
+## Showcase release — September 12, 2026
+
+The release candidate adds one compact, accessible **Showcase** switch to the
+Camera page. It is disabled by default and is a thin RAM-only controller over
+completed real analysis frames. The detector and tracker remain unchanged:
+browser fallback still runs YOLO26n/ONNX Runtime Web, the optional worker still
+runs YOLO26s/PyTorch CUDA, and `time_aware_iou_v2` remains authoritative in the
+camera browser. No backend, relay schema, shared wire schema, worker runtime,
+account, database, analytics or durable storage was added.
+
+After five seconds of advancing analyzed source time, the controller considers
+only observed, tracker-confirmed, non-ambiguous vehicle tracks with confidence at
+least 0.60, at least 100 ms observed duration and a crop long edge of at least
+64 source pixels. A deterministic score combines image area, centrality, edge
+clearance, observed duration, detector confidence and crop size, with lower
+track ID as the final tie-break. Person/bicycle/tentative/lost/ambiguous/small
+tracks are ineligible and plate text is never consulted.
+
+One selected identity is locked, shown in red as `TRAFFIC ALERT`, passed through
+the existing Selected Vehicle path, saved immediately as one temporary report,
+and submitted to the existing bounded plate pipeline. A handheld Showcase event
+is an observation with null speed and a visible `Showcase trigger`; a genuine
+mounted speed candidate keeps the real speed semantics and reuses/upgrades the
+same report ID instead of creating a duplicate. Showcase automatically retains
+one bounded evidence JPEG in browser RAM even when normal manual evidence is
+off. End session/pagehide clears it with the session; no browser storage write
+is introduced.
+
+Fresh release-candidate evidence:
+
+- clean baseline started at `3170eab`; dependency install reported zero audit
+  findings and the pre-edit full matrix was green;
+- 267 unit, 85 contract, 84 real relay integration, 42 tracking and 11 real
+  browser-model tests pass;
+- 14/14 desktop browser E2E scenarios pass, including one real permitted-replay
+  Showcase flow at 375/390-pixel portrait and 844×390 landscape, keyboard/ARIA,
+  red target, exact report facts/evidence, paired viewer delivery, one-event
+  behavior and End/pagehide/reload cleanup;
+- actual local browser → relay → RTX 5070 Ti CUDA acceptance passes 1/1 with
+  Showcase selecting a real GPU detection and emitting a real RLP1 plate
+  request before the existing fallback/reconnect/restart checks;
+- privacy scans pass across 52 application modules and 224 tracked files, with
+  10/10 privacy browser scenarios; worker tests pass 95 tests/139 subtests and
+  the real launcher warmup/authentication/Ctrl+C test passes;
+- compiled same-origin and split-origin production smokes pass 1/1 each; build,
+  typecheck, lint and all three deployment-schema checks pass.
+
+Two matched five-second local replay diagnostics measured 4.62 analyzed
+frames/s with Showcase off and 4.58–4.80 frames/s with it on (4.69 median);
+matched overlay-age samples were 74/190 ms off and 59/188 ms on. This is short
+headless desktop replay evidence, not a physical-phone claim. The clean pre-edit
+640 CUDA path measured 8.27 result Hz,
+8.08 ms mean GPU inference and 13.67 ms mean worker time; the Showcase GPU
+acceptance measured 8.53 result Hz, 8.41 ms mean inference and 13.11 ms mean
+worker time. The primary detector was not changed and no significant regression
+is observed; these repeated-photo/loopback results are not traffic accuracy or
+public-network performance.
+
+The post-change six-profile worker benchmark also remained within the existing
+runtime range: PyTorch CUDA fast/balanced/quality measured 8.09/8.26/10.05 ms
+median inference and 14.75/14.86/16.95 ms total; ONNX CUDA measured
+5.96/9.29/17.07 ms inference and 12.97/15.96/23.89 ms total. All profiles found
+the same five real detections on the permitted fixture.
+
+Physical phone, live-road plate legibility and field speed accuracy remain
+**NOT VERIFIED**. The normal production push and Vercel verification follow the
+local release gates; Render and worker application code are unchanged.
+
 ## Vehicle intelligence and tracking pass — September 11, 2026
 
 Baseline reproduced on clean main `948e13a` before any edit: typecheck, lint,

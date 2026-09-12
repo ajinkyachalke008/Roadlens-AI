@@ -101,7 +101,7 @@ export class PlateCapture {
   reset() {
     this.tracks.clear();
     this.explicit.clear();
-    this.requestedAt.clear();
+        this.requestedAt.clear();
     this.epoch = null;
     this.busy = false;
     this.unavailable = false;
@@ -113,16 +113,22 @@ export class PlateCapture {
     this.onChange();
   }
 
-  /** Operator explicitly asks for this vehicle, whatever the rules think. */
-  request(trackId: number) {
+  /**
+   * Explicitly ask for this vehicle, whatever the rules think. Availability is
+   * supplied by the caller so a browser-only session resolves to an honest
+   * "Plate unavailable" instead of waiting for a worker that does not exist.
+   */
+  request(trackId: number, available = true) {
     if (this.explicit.size >= PLATE_LIMITS.tracks) return false;
     this.explicit.add(trackId);
+    if (!available) this.unavailable = true;
     // The moment of asking starts the clock, not the first successful
     // submission. Refusals hand the frame budget back so a better look can be
     // tried, which is right, but it must not leave the operator being told
     // nothing was analysed while the system is still trying.
     if (!this.requestedAt.has(trackId))
       this.requestedAt.set(trackId, this.clock());
+    this.onChange();
     return true;
   }
 

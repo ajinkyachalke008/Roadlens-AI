@@ -1,5 +1,72 @@
 # RoadLens demo runbook
 
+## Showcase presentation flow — September 12, 2026
+
+Showcase is a small camera-page switch that automates one truthful presentation
+event. It does not change the detector, tracker, plate reader, speed gates or
+privacy model. The switch is **off by default** and its state is held only in
+the camera tab's RAM.
+
+### Before the presentation
+
+1. Complete `./setup-worker.ps1` once on the RTX 5070 Ti computer and keep the
+   real production WSS relay URL and matching secret in ignored `.env.worker`.
+2. Run `./start.ps1` and wait for `GPU WORKER READY`. Do not expose an inbound
+   port or start a development tunnel.
+3. Open <https://roadlens-ai-five.vercel.app/camera> on the phone and confirm
+   **Showcase · Off**. Open the viewer on the second device if the paired view
+   is part of the presentation.
+4. Keep one permitted traffic replay clip available on the phone as the
+   emergency fallback. It must go through **Use replay video** and the real
+   detector; prerecorded detection JSON is never allowed.
+
+### During the presentation
+
+1. Toggle **Showcase** on. Its compact status reads **Arming**.
+2. Start the camera, keep the view steady and point it at actual traffic.
+3. After about five seconds of completed analyzed source time, the status moves
+   to **Waiting** until a real eligible vehicle appears.
+4. RoadLens chooses one observed, non-ambiguous, confirmed car, motorcycle, bus
+   or truck with sufficient confidence, duration and crop size. A deterministic
+   visual score favors a large, central, clear target; plate text is not an
+   input.
+5. The chosen track locks, turns red with `TRAFFIC ALERT`, opens the existing
+   Selected Vehicle card, and creates exactly one temporary report from that
+   same completed analysis frame. In handheld mode the report speed stays
+   unavailable; red means presentation target, not speeding.
+6. The existing plate pipeline starts for that track alone. Show the real
+   consensus text only if OCR succeeds; otherwise show **Analyzing…**,
+   **Unreadable**, or **Plate unavailable**. The report appears immediately and
+   follows later plate consensus updates.
+7. The paired viewer receives the report and its one bounded RAM evidence image
+   through the normal report/evidence flow. The operator may review or explicitly
+   download it as usual.
+
+Showcase produces one automatic event per enabled run. Toggle it off and on to
+start a fresh run. Toggle off clears the Showcase target without deleting an
+already-created session report. End session, pagehide, reload or source/runtime
+continuity reset clears the applicable RAM-only state and never carries a target
+across capture epochs.
+
+### Honest fallbacks
+
+- **No eligible vehicle:** the status stays **Waiting** and then ends as **No
+  vehicle** after the bounded 25-second acquisition window; no box or report is
+  invented.
+- **GPU unavailable:** browser WASM remains real vehicle inference, while the
+  report says **Plate unavailable**.
+- **Poor/short plate view:** the existing bounded plate path settles
+  **Unreadable**; it never generates a sample plate.
+- **No useful live scene:** use the permitted replay through the real inference
+  and tracking path. The stage remains visibly labeled **REPLAY**.
+- **Handheld or invalid calibration:** speed remains null. Mounted speed appears
+  only if the unchanged calibration, stationary-background, sampling and rule
+  gates produce a genuine speed candidate.
+
+The automated desktop and local-CUDA paths are verified. A physical phone,
+cellular/second-network run and real-road plate/speed behavior remain **NOT YET
+VERIFIED** until the checklist below is executed.
+
 ## GPU demonstration — cloud path verified
 
 The Render relay is deployed and the full cloud path is verified: the real paired

@@ -1,5 +1,44 @@
 # RoadLens implementation handoff
 
+## Showcase release handoff — September 12, 2026
+
+RoadLens now has a top-level **Showcase** switch on the Camera page. It defaults
+off and does nothing beyond one boolean check while off. When enabled, it waits
+for five seconds of completed source-time analysis, deterministically selects
+one real stable vehicle, locks the existing selected-track identity, draws only
+that target red, creates one existing-schema RAM report with one bounded event
+image, and requests the existing plate pipeline for the same track. It does not
+create a second inference, tracking, OCR, reporting or viewer architecture.
+
+The truthful boundaries are explicit: a red box means presentation target, not
+a speeding violation; handheld speed remains null; plate text is absent unless
+multi-frame OCR consensus actually succeeds; no eligible car means no event;
+browser fallback reports plate unavailable; and a real mounted speed candidate
+is deduplicated into the same report identity. `Showcase trigger` appears in the
+observation detail and paired viewers receive the normal report revisions and
+evidence request flow.
+
+State is browser-RAM only. Toggle off clears its target, while End session and
+pagehide clear reports/evidence/plate consensus as before. Source, orientation,
+camera or inference-runtime continuity resets re-arm an enabled run and never
+carry an identity across capture epochs. An enabled run creates at most one
+automatic event; an explicit off→on is required for another.
+
+Release-candidate verification is green: 267 unit, 85 contract, 84 integration,
+42 tracking, 11 browser-model and 14 browser E2E tests; one compiled same-origin
+and one split-origin production smoke; and one actual browser/relay/RTX 5070 Ti
+CUDA acceptance including a real Showcase plate request. Two fair five-second
+desktop replay samples measured 4.62 Hz off vs 4.58–4.80 Hz on (4.69 median);
+640 CUDA integration measured 8.27 result Hz before vs 8.53 after. See `docs/STATUS.md` and
+`docs/DEMO_RUNBOOK.md` for the evidence boundaries and exact presentation flow.
+Privacy scans and 10/10 privacy browser scenarios pass; the unchanged worker
+passes 95 tests/139 subtests and its real startup/Ctrl+C check.
+
+Physical phone/cellular operation, live-road plates and field speed accuracy are
+still **NOT VERIFIED**. No backend, Render relay, shared protocol or worker
+runtime source changed in this release; the frontend production deployment is
+the affected service.
+
 The current application adds an optional Windows NVIDIA detector to the existing browser detector. GPU mode requires that computer to be running and connected outbound to the relay. Browser mode retains camera-side inference and does not require a desktop worker. Tracking, calibration, rules and temporary reports remain authoritative in the camera browser in both modes.
 
 The new request supersedes the earlier local-worker prohibition. It does not authorize cloud GPU inference, an inbound worker server, tunnels, accounts, a database or persistent media storage.

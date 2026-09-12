@@ -178,6 +178,8 @@ export class RelayClient {
    * strict schema would reject - and so disconnect - a camera that sent them.
    */
   frameProtocol = 1;
+  /** Adaptive report/image fields accepted by the connected relay. */
+  reportProtocol = 1;
   constructor(
     private roomId: string,
     private role: "camera" | "viewer",
@@ -236,6 +238,10 @@ export class RelayClient {
           this.frameProtocol =
             Number.isInteger(m.frameProtocol) && Number(m.frameProtocol) >= 1
               ? Number(m.frameProtocol)
+              : 1;
+          this.reportProtocol =
+            Number.isInteger(m.reportProtocol) && Number(m.reportProtocol) >= 1
+              ? Number(m.reportProtocol)
               : 1;
           this.viewerCount = Number(m.viewerCount) || 0;
           this.onState("Connected");

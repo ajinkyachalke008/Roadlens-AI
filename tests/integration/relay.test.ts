@@ -1139,6 +1139,7 @@ describe("Release: analysis-frame protocol negotiation", () => {
     const owner = await f.connect();
     const ok = await owner.hello(room.roomId, room.ownerToken);
     expect(ok.frameProtocol).toBe(2);
+    expect(ok.reportProtocol).toBe(2);
   });
 
   it("relays a frame carrying the new mode and selection fields", async () => {

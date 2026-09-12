@@ -28,6 +28,10 @@ export interface PlateObservation {
 export interface PlateConsensus {
   plateText: string | null;
   plateConfidence: number | null;
+  /** Strongest actual OCR string below confirmation, never a voted rewrite. */
+  candidateText: string | null;
+  candidateConfidence: number | null;
+  candidateSupportingFrames: number;
   supportingFrames: number;
   detectorConfidence: number | null;
   /** Readings considered, including those that read nothing. */
@@ -65,6 +69,9 @@ export function plateConsensus(
   const empty: PlateConsensus = {
     plateText: null,
     plateConfidence: null,
+    candidateText: null,
+    candidateConfidence: null,
+    candidateSupportingFrames: 0,
     supportingFrames: 0,
     detectorConfidence: null,
     observations: observations.length,
@@ -140,18 +147,30 @@ export function plateConsensus(
   const detectorConfidence = detectorConfidences.length
     ? Math.max(...detectorConfidences)
     : null;
+  const candidate = [...members].sort((a, b) => weightOf(b) - weightOf(a))[0]!;
+  const candidateAllowed =
+    (candidate.confidence ?? 0) >= PLATE_LIMITS.candidateConfidence &&
+    (candidate.detectorConfidence ?? 0) >=
+      PLATE_LIMITS.candidateDetectorConfidence &&
+    candidate.quality >= PLATE_LIMITS.candidateQuality;
   if (
     supportingFrames < PLATE_LIMITS.minSupportingFrames ||
     plateConfidence < PLATE_LIMITS.minConfidence
   )
     return {
       ...empty,
+      candidateText: candidateAllowed ? candidate.text : null,
+      candidateConfidence: candidateAllowed ? candidate.confidence : null,
+      candidateSupportingFrames: candidateAllowed ? supportingFrames : 0,
       supportingFrames,
       detectorConfidence,
     };
   return {
     plateText: text,
     plateConfidence,
+    candidateText: null,
+    candidateConfidence: null,
+    candidateSupportingFrames: 0,
     supportingFrames,
     detectorConfidence,
     observations: observations.length,

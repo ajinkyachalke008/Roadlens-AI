@@ -41,6 +41,7 @@
     "plate:dataset": "node scripts/worker-python.mjs training/plates/openimages.py",
     "plate:train": "node scripts/worker-python.mjs training/plates/train_plate.py",
     "plate:benchmark": "node scripts/worker-python.mjs -m worker.runtime.plate_benchmark",
+    "showcase:benchmark": "tsx scripts/showcase-benchmark.ts",
     "measure:production": "node scripts/measure-production.mjs"
   },
   "dependencies": {

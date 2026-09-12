@@ -208,7 +208,7 @@ describe("B22/B24/B46 RAM report and evidence stores (synthetic metadata)", () =
     expect(store.evidenceCount).toBe(1);
     expect(published).toHaveBeenCalledTimes(1);
   });
-  it("upgrades the same Showcase report to a genuine speed candidate without a duplicate", () => {
+  it("upgrades the same Showcase report without replacing its event frame or pixels", async () => {
     const store = new SessionStore(),
       published = vi.fn(),
       reportId = uuid(901),
@@ -269,7 +269,9 @@ describe("B22/B24/B46 RAM report and evidence stores (synthetic metadata)", () =
     expect(store.reports.get(reportId)).toMatchObject({
       reportId,
       revision: 1,
-      frameId: qualified.frameId,
+      frameId: first.frameId,
+      measurementFrameId: qualified.frameId,
+      measurementSourceTimeMs: qualified.sourceTimeMs,
       kind: "speed_candidate",
       speedMps: 14.2,
       calibrationVersion: uuid(700),
@@ -277,6 +279,9 @@ describe("B22/B24/B46 RAM report and evidence stores (synthetic metadata)", () =
       evidenceSummary: summary,
     });
     expect(store.evidenceCount).toBe(1);
+    expect(
+      await store.image(store.reports.get(reportId)!.evidenceId!)?.text(),
+    ).toBe("initial");
     expect(published).toHaveBeenCalledTimes(2);
     expect(store.episodeId("same-real-episode", reportId)).toBe(reportId);
     expect(store.episodeId("same-real-episode")).toBe(reportId);
@@ -357,18 +362,57 @@ describe("B22/B24/B46 RAM report and evidence stores (synthetic metadata)", () =
     expect(store.evidenceSize).toBe(bytes.length);
     expect(store.image(uuid(1))).toBeUndefined();
   });
-  it("replacement accounting and oversized rejection cannot leak byte counters", () => {
+  it("event evidence is immutable and oversized rejection cannot leak byte counters", () => {
     const store = new SessionStore();
     store.retain(uuid(1), new Blob(["12345"]));
     store.retain(uuid(1), new Blob(["ab"]));
-    expect(store.evidenceSize).toBe(2);
+    expect(store.evidenceSize).toBe(5);
     expect(
       store.retain(
         uuid(2),
         new Blob([new Uint8Array(LIMITS.evidenceBytes + 1)]),
       ),
     ).toBe(false);
-    expect(store.evidenceSize).toBe(2);
+    expect(store.evidenceSize).toBe(5);
+  });
+  it("keeps improving capture artifacts separate from immutable event evidence", async () => {
+    const store = new SessionStore();
+    const eventId = uuid(1000);
+    store.upsert({
+      ...report(),
+      evidenceId: eventId,
+      evidenceState: "available",
+    });
+    store.retain(eventId, new Blob(["event"]));
+    const artifact = {
+      blob: new Blob(["crop-1"], { type: "image/jpeg" }),
+      frameId: frame(2).frameId,
+      sourceTimeMs: frame(2).sourceTimeMs,
+      width: 640,
+      height: 320,
+      quality: 0.6,
+      sharpness: 9,
+    };
+    expect(store.applyArtifact(report().reportId, "vehicle", artifact)).toBe(
+      true,
+    );
+    const firstId = store.reports.get(report().reportId)!.bestCapture!.imageId;
+    expect(firstId).not.toBe(eventId);
+    expect(store.detailCount).toBe(1);
+    expect(
+      store.applyArtifact(report().reportId, "vehicle", {
+        ...artifact,
+        blob: new Blob(["crop-2"], { type: "image/jpeg" }),
+        frameId: frame(3).frameId,
+        sourceTimeMs: frame(3).sourceTimeMs,
+        quality: 0.8,
+      }),
+    ).toBe(true);
+    const current = store.reports.get(report().reportId)!;
+    expect(current.bestCapture?.imageId).not.toBe(firstId);
+    expect(store.image(firstId)).toBeUndefined();
+    expect(await store.image(eventId)?.text()).toBe("event");
+    expect(store.detailCount).toBe(1);
   });
   it("report FIFO eviction also releases its retained evidence", () => {
     const store = new SessionStore();
@@ -381,6 +425,8 @@ describe("B22/B24/B46 RAM report and evidence stores (synthetic metadata)", () =
     for (let i = 2; i <= 201; i++) store.upsert(report(i));
     expect(store.evidenceCount).toBe(0);
     expect(store.evidenceSize).toBe(0);
+    expect(store.detailCount).toBe(0);
+    expect(store.detailSize).toBe(0);
   });
   it("end-session clear releases reports, images and accounting", () => {
     const store = new SessionStore();

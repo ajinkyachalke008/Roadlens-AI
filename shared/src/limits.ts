@@ -85,12 +85,25 @@ export const PLATE_LIMITS = Object.freeze({
   maxInFlight: 1,
   /** Bounded candidate crops retained and submitted per track. */
   framesPerTrack: 4,
+  /** Quality-aware Showcase candidates considered over time; only top-K stay. */
+  adaptiveFrames: 8,
   /** Raw report-target crops retained briefly for one bounded rescue pass. */
-  rescueFrames: 4,
+  rescueFrames: 8,
   rescueReports: 2,
-  rescueTtlMs: 3_000,
+  /** Source-time collection window and hard wall-clock privacy TTL. */
+  captureWindowMs: 4_800,
+  rescueTtlMs: 9_000,
   rescueBytes: 8 * 96 * 1024,
   rescueRetriesPerCrop: 1,
+  /** Roughly 3 Hz source sampling, with slower OCR admission for GPU headroom. */
+  captureIntervalMs: 320,
+  adaptiveSubmissionIntervalMs: 600,
+  cropReplacementEpsilon: 0.025,
+  previewImprovementEpsilon: 0.04,
+  previewUpdates: 4,
+  /** Final report-detail images have a separate RAM cap from event evidence. */
+  detailImages: 16,
+  detailBytes: 2 * 1024 * 1024,
   /** Bounded number of tracks under plate analysis at once. */
   tracks: 8,
   /** Submission floor, independent of the analysis rate. */
@@ -109,4 +122,8 @@ export const PLATE_LIMITS = Object.freeze({
   minConfidence: 0.55,
   minTextLength: 2,
   maxTextLength: 10,
+  /** A transparent single-frame candidate is never the confirmed plate field. */
+  candidateConfidence: 0.88,
+  candidateDetectorConfidence: 0.5,
+  candidateQuality: 0.55,
 });

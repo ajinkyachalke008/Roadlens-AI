@@ -36,6 +36,10 @@ export default function Viewer() {
   const client = useRef<RelayClient | null>(null);
   const store = useRef(new SessionStore(false)).current;
   const bitmap = useRef<ImageBitmap | null>(null);
+  // React can still have one committed preview waiting for its passive draw
+  // effect when the next one arrives. Retain two old 640-edge bitmaps so they
+  // cannot be detached underneath that draw; this queue is strictly bounded.
+  const retiredBitmaps = useRef<ImageBitmap[]>([]);
   const frameRef = useRef<DisplayFrame | null>(null);
   const decodeSeq = useRef(0);
   const epoch = useRef("");
@@ -57,11 +61,22 @@ export default function Viewer() {
   const mounted = useRef(true);
   const joinPending = useRef(false);
   const joinAbort = useRef<AbortController | null>(null);
+  function retireBitmap(image: ImageBitmap | null) {
+    if (!image) return;
+    retiredBitmaps.current.push(image);
+    while (retiredBitmaps.current.length > 2)
+      retiredBitmaps.current.shift()!.close();
+  }
+  function closeBitmaps() {
+    bitmap.current?.close();
+    bitmap.current = null;
+    for (const image of retiredBitmaps.current) image.close();
+    retiredBitmaps.current = [];
+  }
   function clearPreview() {
     decodeSeq.current++;
     decoder.reset();
-    bitmap.current?.close();
-    bitmap.current = null;
+    closeBitmaps();
     frameRef.current = null;
     setFrame(null);
     setSourceOnline(false);
@@ -168,7 +183,7 @@ export default function Viewer() {
         return;
       clearTimeout(request.timer);
       pendingRequests.current.delete(header.requestId);
-      store.retain(
+      store.retainRequested(
         header.evidenceId,
         new Blob([new Uint8Array(jpeg)], { type: "image/jpeg" }),
       );
@@ -216,7 +231,7 @@ export default function Viewer() {
     setFrame(next);
     setSourceOnline(true);
     setStatus("Live sampled view");
-    old?.close();
+    retireBitmap(old);
     const now = performance.now();
     arrivals.current.push(now);
     arrivals.current = arrivals.current.filter((t) => now - t < 5000);
@@ -329,10 +344,14 @@ export default function Viewer() {
       setError("Review was not sent. Reconnect to camera.");
     }
   }
-  function requestEvidence(report: Report) {
+  function requestEvidence(report: Report, requestedImageId?: string) {
+    const imageId = requestedImageId ?? report.evidenceId;
     if (
       !client.current?.connected ||
-      !report.evidenceId ||
+      !imageId ||
+      [...pendingRequests.current.values()].some(
+        (request) => request.evidenceId === imageId,
+      ) ||
       pendingRequests.current.size >= 16
     )
       return;
@@ -343,14 +362,14 @@ export default function Viewer() {
     );
     pendingRequests.current.set(requestId, {
       reportId: report.reportId,
-      evidenceId: report.evidenceId,
+      evidenceId: imageId,
       timer,
     });
     client.current.send({
       v: 2,
       type: "evidence.request",
       requestId,
-      evidenceId: report.evidenceId,
+      evidenceId: imageId,
     });
   }
   useEffect(() => {
@@ -390,8 +409,7 @@ export default function Viewer() {
       window.removeEventListener("pageshow", show);
       client.current?.close();
       client.current = null;
-      bitmap.current?.close();
-      bitmap.current = null;
+      closeBitmaps();
       frameRef.current = null;
       store.onChange = () => {};
       store.clear();

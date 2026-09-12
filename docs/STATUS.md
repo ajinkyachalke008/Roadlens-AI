@@ -1,5 +1,68 @@
 # RoadLens release status
 
+## Adaptive plate acquisition release candidate — September 12, 2026
+
+The early-capture weakness is fixed in source. Showcase no longer creates an
+event primarily because a five-second timer elapsed. It arms at 4.0 s of
+advancing source time, selects only a real confirmed vehicle, observes it for
+800 ms, locks that identity in amber, and waits for useful real source pixels.
+The normal readiness threshold is 0.68; bounded quality/trajectory fallbacks
+start at 0.56; per-target and overall waits are 6.5 s and 25 s. Readiness uses
+vehicle pixel size, measured crop sharpness/quality, centrality, framing,
+tracking stability, detector score and robust image-scale growth. Plate text is
+never an input.
+
+Camera capture now has explicit standard and Showcase profiles. Showcase asks
+for ideal 1920×1080 at 30 FPS and reports `getSettings()` plus advisory
+capability data. Constraint failures fall back to the standard 1280×720 ideal
+profile. The browser still chooses the real supported format, and the detector
+transport remains independently bounded at 640/960; higher source resolution
+therefore benefits source crops without enlarging every analysis request.
+Actual physical-iPhone resolution and throughput remain **NOT YET VERIFIED**.
+
+At target lock, a 4.8 s source-time acquisition begins. At 320 ms cadence it can
+score at most 16 distinct source looks; only the quality-ranked top eight
+96 KiB-or-smaller crops are retained and submitted, with 768 KiB maximum raw-crop memory.
+OCR submissions remain single-flight and at least 600 ms apart. Two distinct
+frames are still required for confirmation, and confirmation stops capture and
+erases raw crops immediately. A strong single OCR result may be shown only as
+`Possible plate · Unconfirmed`; it never populates the confirmed plate field.
+
+The annotated report-time Event evidence is immutable. Separate Best Vehicle
+Capture and optional Best Plate Detail artifacts may improve in place from
+later real source frames. They have independent IDs and RAM caps, preserve
+source frame/time/dimensions, and synchronize through report revisions to an
+already-open camera report and paired viewer. No pixels are synthesized, no
+confidence threshold is weakened, and no persistent storage, logging, cloud
+GPU or paid service was added.
+
+Local verification is green: typecheck, lint and production build; 295 unit,
+87 contract, 84 real-relay integration, 42 tracking, 11 browser-model, 14 E2E
+and 10 browser privacy scenarios; 95 worker tests / 139 subtests; and 1/1 real
+browser → relay → RTX CUDA GPU acceptance. Static privacy scans cover 55
+application modules and 231 tracked files. Two matched E2E samples measured
+4.204/4.211 analyzed Hz off versus 4.124/4.494 on (-1.9%/+6.7%), with 127/118
+versus 135/179 ms overlay age. The sign-changing short-run variation and
+isolated result below show no sustained detector-rate regression; this is
+desktop replay, not a phone claim.
+
+The deterministic readiness benchmark records 0.520/0.628/0.931 for
+small/medium/large-sharp 1080p looks and waits until the high-quality 5.5 s
+frame; scoring cost measured 0.171 µs per candidate. The isolated traffic/plate
+benchmark measured 63.83 Hz baseline versus 63.05 Hz interleaved (-1.2%), with
+16.24 ms median plate read. OpenALPR US remains 86.49% exact, 95.34% character
+accuracy and 99.10% coverage. These are local replay/public-data measurements;
+physical unreadable recovery and wrong-promotion rates remain unmeasured.
+
+Git push and production deployment are pending the final diff review. The relay
+source changed only to advertise report protocol v2; it must be deployed before
+the frontend. The worker runtime is unchanged and requires no restart. The new
+frontend downlevels report metadata for an older relay, so mixed deployment
+fails safely.
+
+The previous report-target rescue section below is preserved as release
+history; its four-frame/three-second contract is superseded.
+
 ## Report-target plate rescue — September 12, 2026
 
 Implemented a bounded original-pixel rescue path for Showcase and new speed
@@ -238,7 +301,6 @@ had caught:
 negotiates down and viewers simply do not receive mode, selection or motion;
 nothing else is affected and nothing measured changes.
 
-
 After the fix, the same live path settles correctly: `Analyzing…` for about
 twelve seconds, then `Unreadable`, with two reads completed at 174 ms median —
 the right answer for a photograph carrying no legible plate. A plate that two
@@ -288,7 +350,6 @@ depth 1 rather than thrashing.
 Still unverified: physical iPhone behaviour after these changes, field speed
 accuracy, and detection quality metrics (no licensed traffic evaluation set).
 Wrong-way remains disabled. Plate recognition is implemented on the optional GPU worker and validated on licensed public data; a single-class plate detector was trained locally from the pinned official YOLO26n checkpoint. Physical plate validation with a real camera has not been performed. See docs/PLATE_RESULTS.md.
-
 
 ## GPU upgrade — active September 11, 2026
 

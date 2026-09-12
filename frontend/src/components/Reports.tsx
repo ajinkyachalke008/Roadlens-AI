@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import type { Report } from "../../../shared/src/schemas";
 import type { SessionStore } from "../session/store";
 import { csvExport, jsonExport, download } from "../session/export";
@@ -8,10 +8,9 @@ import { SHOWCASE_TRIGGER_REASON } from "../showcase/constants";
 /**
  * One settled line of plate text for a report.
  *
- * Intermediate OCR strings never reach this function: the camera only writes a
- * reading into a report once multi-frame consensus has settled, so the card
- * shows a value, an honest "Analyzing…", or an honest "Unreadable" — never a
- * guess that changes under the reader's eyes.
+ * Confirmed text still requires multi-frame consensus. A separately gated
+ * single-frame candidate may be shown only as "Possible" and "Unconfirmed";
+ * it never populates the confirmed plate field.
  */
 export function plateLabel(report: Report) {
   switch (report.plateStatus) {
@@ -24,11 +23,15 @@ export function plateLabel(report: Report) {
           }`
         : "Unreadable";
     case "pending":
-      return "Analyzing…";
+      return report.plateCandidateText
+        ? `Possible plate: ${report.plateCandidateText} · Unconfirmed · ${report.plateCandidateSupportingFrames ?? 1} frame`
+        : "Analyzing clearer frames…";
     case "unreadable":
-      return typeof report.plateDetectorConfidence === "number"
-        ? "Plate located · text unreadable"
-        : "Unreadable";
+      return report.plateCandidateText
+        ? `Possible plate: ${report.plateCandidateText} · Unconfirmed · ${report.plateCandidateSupportingFrames ?? 1} frame`
+        : typeof report.plateDetectorConfidence === "number"
+          ? "Plate located · text unreadable"
+          : "Unreadable";
     case "unavailable":
       return "Plate unavailable";
     default:
@@ -88,26 +91,51 @@ export function Reports({
   store: SessionStore;
   revision: number;
   onReview: (r: Report, status: Report["review"]) => void;
-  onEvidence?: (r: Report) => void;
+  onEvidence?: (r: Report, imageId?: string) => void;
   reviewEnabled?: boolean;
   pending?: string;
   speedUnit?: SpeedUnit;
 }) {
   const [selected, setSelected] = useState<string | null>(null);
   const [filter, setFilter] = useState("all");
-  const [url, setUrl] = useState<string | null>(null);
+  const [urls, setUrls] = useState<{
+    event: string | null;
+    vehicle: string | null;
+    plate: string | null;
+  }>({ event: null, vehicle: null, plate: null });
   const reports = store.snapshot().reverse();
   const report = selected ? store.reports.get(selected) : undefined;
+  const evidenceRequest = useRef(onEvidence);
+  evidenceRequest.current = onEvidence;
   useEffect(() => {
-    const blob = report?.evidenceId
-      ? store.image(report.evidenceId)
-      : undefined;
-    const next = blob ? URL.createObjectURL(blob) : null;
-    setUrl(next);
-    return () => {
-      if (next) URL.revokeObjectURL(next);
+    const created: string[] = [];
+    const resolve = (id?: string | null, available = false) => {
+      if (!id) return null;
+      const blob = store.image(id);
+      if (!blob) {
+        if (available && report) evidenceRequest.current?.(report, id);
+        return null;
+      }
+      const url = URL.createObjectURL(blob);
+      created.push(url);
+      return url;
     };
-  }, [report?.evidenceId, revision, store]);
+    const next = {
+      event: resolve(report?.evidenceId, report?.evidenceState === "available"),
+      vehicle: resolve(
+        report?.bestCapture?.imageId,
+        report?.bestCapture?.state === "available",
+      ),
+      plate: resolve(
+        report?.bestPlateDetail?.imageId,
+        report?.bestPlateDetail?.state === "available",
+      ),
+    };
+    setUrls(next);
+    return () => {
+      for (const url of created) URL.revokeObjectURL(url);
+    };
+  }, [report, revision, store]);
   return (
     <section className="reports" aria-label="Reports">
       <div className="section-head">
@@ -164,12 +192,17 @@ export function Reports({
                 key={r.reportId}
                 onClick={() => {
                   setSelected(r.reportId);
-                  if (
-                    r.evidenceState === "available" &&
-                    r.evidenceId &&
-                    !store.image(r.evidenceId)
-                  )
-                    onEvidence?.(r);
+                  for (const imageId of [
+                    r.evidenceState === "available" ? r.evidenceId : null,
+                    r.bestCapture?.state === "available"
+                      ? r.bestCapture.imageId
+                      : null,
+                    r.bestPlateDetail?.state === "available"
+                      ? r.bestPlateDetail.imageId
+                      : null,
+                  ])
+                    if (imageId && !store.image(imageId))
+                      onEvidence?.(r, imageId);
                 }}
               >
                 <time>
@@ -226,11 +259,12 @@ export function Reports({
           }
           onClose={() => setSelected(null)}
         >
-          {url ? (
+          {urls.event ? (
             <>
+              <h3>Event evidence</h3>
               <img
                 className="evidence"
-                src={url}
+                src={urls.event}
                 alt={
                   isShowcaseReport(report)
                     ? `Annotated report evidence with a red alert box around ${(report.className ?? "vehicle").toUpperCase()} · ID ${report.trackId}`
@@ -246,7 +280,10 @@ export function Reports({
               {isShowcaseReport(report) && (
                 <p className="evidence-caption">
                   <strong>Annotated report frame</strong>
-                  <span>The red box marks the exact reported vehicle.</span>
+                  <span>
+                    Immutable event-time image. The red box marks the exact
+                    reported vehicle.
+                  </span>
                 </p>
               )}
               <button
@@ -273,6 +310,66 @@ export function Reports({
                   ? "Image held by camera · unavailable while source is offline"
                   : "Image retention was off"}
             </div>
+          )}
+          {report.bestCapture && (
+            <section className="report-artifact" aria-live="polite">
+              <h3>Best vehicle capture</h3>
+              {urls.vehicle ? (
+                <img
+                  className="evidence"
+                  src={urls.vehicle}
+                  alt="Best real vehicle crop selected across the capture window"
+                  data-testid="report-best-capture"
+                  data-artifact-frame-id={report.bestCapture.frameId}
+                />
+              ) : (
+                <div className="empty-reports">
+                  {report.bestCapture.state === "evicted"
+                    ? "Best capture evicted from memory"
+                    : "Best capture held by camera · loading when connected"}
+                </div>
+              )}
+              <p className="evidence-caption">
+                <strong>
+                  {report.bestCapture.width} × {report.bestCapture.height}{" "}
+                  source px
+                </strong>
+                <span>
+                  Quality {report.bestCapture.quality.toFixed(2)} · source time{" "}
+                  {report.bestCapture.sourceTimeMs.toFixed(0)} ms
+                </span>
+              </p>
+            </section>
+          )}
+          {report.bestPlateDetail && (
+            <section className="report-artifact" aria-live="polite">
+              <h3>Best plate detail</h3>
+              {urls.plate ? (
+                <img
+                  className="evidence plate-detail"
+                  src={urls.plate}
+                  alt="Best real plate-region crop selected across the capture window"
+                  data-testid="report-best-plate"
+                  data-artifact-frame-id={report.bestPlateDetail.frameId}
+                />
+              ) : (
+                <div className="empty-reports">
+                  {report.bestPlateDetail.state === "evicted"
+                    ? "Plate detail evicted from memory"
+                    : "Plate detail held by camera · loading when connected"}
+                </div>
+              )}
+              <p className="evidence-caption">
+                <strong>
+                  {report.bestPlateDetail.width} ×{" "}
+                  {report.bestPlateDetail.height} source px
+                </strong>
+                <span>
+                  Unmodified source pixels · quality{" "}
+                  {report.bestPlateDetail.quality.toFixed(2)}
+                </span>
+              </p>
+            </section>
           )}
           <dl className="facts">
             <dt>Source</dt>
@@ -346,6 +443,16 @@ export function Reports({
                     </dd>
                   </>
                 )}
+                {(report.plateAttemptFrames ?? 0) > 0 && (
+                  <>
+                    <dt>Plate attempts</dt>
+                    <dd data-testid="report-plate-attempts">
+                      {report.plateAttemptFrames} distinct ·{" "}
+                      {report.plateLocalizedFrames ?? 0} localized ·{" "}
+                      {report.plateReadableFrames ?? 0} readable
+                    </dd>
+                  </>
+                )}
               </>
             )}
             <dt>Speed status</dt>
@@ -370,6 +477,14 @@ export function Reports({
             <dd>{report.frameId}</dd>
             <dt>Source time</dt>
             <dd>{report.sourceTimeMs.toFixed(0)} ms</dd>
+            {report.measurementFrameId && (
+              <>
+                <dt>Measurement frame</dt>
+                <dd>{report.measurementFrameId}</dd>
+                <dt>Measurement source time</dt>
+                <dd>{report.measurementSourceTimeMs?.toFixed(0)} ms</dd>
+              </>
+            )}
             <dt>Model</dt>
             <dd>
               {report.modelId} · {report.detectorProfile}

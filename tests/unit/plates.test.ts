@@ -7,7 +7,10 @@ import {
 } from "../../frontend/src/plates/consensus";
 import { cropQuality } from "../../frontend/src/plates/quality";
 import { plateFields } from "../../frontend/src/plates/report";
-import { PlateCapture } from "../../frontend/src/plates/capture";
+import {
+  PlateCapture,
+  plateCaptureQuality,
+} from "../../frontend/src/plates/capture";
 import {
   capturePlateCrop,
   PlateUnavailableError,
@@ -68,6 +71,16 @@ describe("B40 plate multi-frame consensus", () => {
     const result = plateConsensus([look("ABC1234", 0.99)]);
     expect(result.plateText).toBeNull();
     expect(result.supportingFrames).toBe(1);
+    expect(result).toMatchObject({
+      candidateText: "ABC1234",
+      candidateConfidence: 0.99,
+      candidateSupportingFrames: 1,
+    });
+  });
+  it("does not expose a weak single-frame string as a possible plate", () => {
+    const result = plateConsensus([look("ABC1234", 0.87, 0.9, 0.9)]);
+    expect(result.plateText).toBeNull();
+    expect(result.candidateText).toBeNull();
   });
   it("returns null when agreement is too weak to assert", () => {
     const result = plateConsensus([
@@ -153,6 +166,11 @@ describe("B41 plate crop selection and quality ranking", () => {
     for (const entry of [candidate(), candidate({ sharpness: 1e6 })])
       expect(cropQuality(entry)).toBeLessThanOrEqual(1);
   });
+  it("scores a larger localized plate above a tiny one using source pixels", () => {
+    expect(plateCaptureQuality(0.9, 96, 32, 0.8, 12)).toBeGreaterThan(
+      plateCaptureQuality(0.9, 24, 8, 0.8, 12),
+    );
+  });
 });
 
 describe("B42 plate report projection", () => {
@@ -176,6 +194,12 @@ describe("B42 plate report projection", () => {
       plateConfidence: 0.9,
       plateSupportingFrames: 3,
       plateDetectorConfidence: 0.8,
+      plateCandidateText: null,
+      plateCandidateConfidence: null,
+      plateCandidateSupportingFrames: 0,
+      plateAttemptFrames: 0,
+      plateLocalizedFrames: 0,
+      plateReadableFrames: 0,
     });
   });
   it("never carries text on a status that did not settle", () => {
@@ -716,9 +740,9 @@ describe("B46 report-target raw crop rescue", () => {
       plates.beginReportRescue(frame, fakeCanvas(), asRemote(remote), 1),
     ).toBe(true);
     await settle();
-    clock += PLATE_LIMITS.minIntervalMs;
+    clock += PLATE_LIMITS.adaptiveSubmissionIntervalMs;
     const second = analysed(
-      18,
+      19,
       [track({ ruleState: "normal" })],
       frame.captureEpoch,
     );
@@ -735,6 +759,67 @@ describe("B46 report-target raw crop rescue", () => {
     // Confirmation destroys every rescue pixel immediately.
     expect(plates.diagnostics.rescueCrops).toBe(0);
     plates.reset();
+  });
+
+  it("uses at most eight distinct adaptive source frames and then frees candidates", async () => {
+    const remote = fakeRemote(() => ({
+      plateText: null,
+      plateConfidence: null,
+    }));
+    const first = analysed(1, [track({ ruleState: "normal" })]);
+    plates.beginAdaptiveCapture(first, fakeCanvas(), asRemote(remote), 1);
+    await settle();
+    for (let index = 1; index < PLATE_LIMITS.adaptiveFrames + 4; index++) {
+      clock += PLATE_LIMITS.adaptiveSubmissionIntervalMs;
+      const next = analysed(
+        1 + index * 2,
+        [track({ ruleState: "normal" })],
+        first.captureEpoch,
+      );
+      plates.observe(next, fakeCanvas(), asRemote(remote));
+      await settle();
+    }
+    expect(new Set(remote.frames).size).toBe(PLATE_LIMITS.adaptiveFrames);
+    expect(remote.frames).toHaveLength(PLATE_LIMITS.adaptiveFrames);
+    expect(plates.diagnostics.rescueCrops).toBe(0);
+    expect(plates.state(1)).toMatchObject({
+      status: "unreadable",
+      distinctFrames: PLATE_LIMITS.adaptiveFrames,
+      acquisitionActive: false,
+    });
+  });
+
+  it("publishes real vehicle and localized plate crops as separate artifacts", async () => {
+    const emitted = vi.fn();
+    plates.onArtifact = emitted;
+    (globalThis as { createImageBitmap?: unknown }).createImageBitmap =
+      async () => ({ close: vi.fn() }) as unknown as ImageBitmap;
+    const remote = fakeRemote();
+    plates.beginAdaptiveCapture(
+      analysed(1, [track({ ruleState: "normal" })]),
+      fakeCanvas(),
+      asRemote(remote),
+      1,
+    );
+    await settle();
+    await settle();
+    expect(emitted).toHaveBeenCalledWith(
+      1,
+      "vehicle",
+      expect.objectContaining({
+        blob: expect.any(Blob),
+        frameId: expect.any(String),
+      }),
+    );
+    expect(emitted).toHaveBeenCalledWith(
+      1,
+      "plate",
+      expect.objectContaining({
+        blob: expect.any(Blob),
+        width: expect.any(Number),
+      }),
+    );
+    delete (globalThis as { createImageBitmap?: unknown }).createImageBitmap;
   });
 
   it("keeps rescue pixels inside their separate hard byte and crop bounds", async () => {

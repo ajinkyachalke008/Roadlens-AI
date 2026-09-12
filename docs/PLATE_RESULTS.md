@@ -1,5 +1,60 @@
 # Plate recognition: measured results and status
 
+## Adaptive source-pixel acquisition — September 12, 2026
+
+This release replaces the earlier report-time-only rescue with a quality-aware,
+same-track acquisition window. Showcase now begins collecting raw source crops
+when a stable target is locked, before the report exists. It samples at most
+once every 320 ms, can score at most 16 distinct looks over 4.8 s, retains and
+submits no more than the top-ranked eight, submits OCR no faster than every 600 ms, and
+stops immediately when the existing two-distinct-frame consensus confirms a
+plate. The strict 96 KiB crop, 768 KiB aggregate and one-in-flight limits remain.
+Eight was selected because it doubles the former temporal diversity without
+raising the established raw-pixel memory ceiling; a 600 ms admission interval
+also permits at most eight OCR starts inside the 4.8 s window. The 320 ms sampler
+can score up to 16 looks, allowing later, materially better crops to displace a
+weaker retained candidate instead of reverting to first-N capture.
+
+The initial annotated event frame remains immutable. Two separately bounded
+real-pixel artifacts may improve as clearer frames arrive: **Best Vehicle
+Capture** and, only after a real plate localization, **Best Plate Detail**.
+Neither is evidence replacement or generative enhancement. Report revisions and
+the paired viewer update without closing and reopening the report.
+
+Showcase is no longer a five-second trigger. It arms after 4.0 s of advancing
+source time, searches for an eligible confirmed vehicle, observes the same
+candidate for 800 ms, and then waits up to 6.5 s for capture readiness. The
+0.68 normal threshold is based on real source-pixel size, measured sharpness,
+crop quality, centrality, framing, track stability, detector score and robust
+image-scale growth. A 0.56 bounded fallback prevents an otherwise useful target
+from waiting forever. Plate text is never a selection input.
+
+The deterministic benchmark in
+[`evidence/showcase-adaptive-benchmark.json`](evidence/showcase-adaptive-benchmark.json)
+reproduces the original weakness: at 1080p, a small early look scores 0.520, a
+medium look 0.628, and the later large/sharp look 0.931 after growth is included.
+The controller stays searching at 4.0 and 4.6 s, locks at 4.9 s, and creates the
+event at the higher-quality 5.5 s frame. Its scoring loop measured 0.171 µs per
+candidate on this desktop. This is deterministic signal/geometry evidence, not
+a physical camera or plate-read measurement.
+
+The current OpenALPR US rerun remains a single-frame public-dataset reference:
+detector precision 0.9205, recall 0.9910, exact end-to-end OCR 86.49%, character
+accuracy 95.34%, coverage 99.10%, and 15.71 / 16.56 / 18.97 ms
+median/mean/p95 latency. Ground-truth crops with the selected raw OCR path
+measured 88.74% exact, 97.96% character accuracy, 100% coverage, 3.74 ms mean
+and 4.65 ms p95. It cannot establish adaptive unreadable recovery, false
+promotion, or physical iPhone performance.
+
+Current functional tests prove bounded top-K replacement, distinct-frame
+identity, early confirmation cleanup, live artifact replacement, immutable
+event evidence and viewer synchronization. Physical `Unreadable → correct`
+recovery and wrong-plate promotion rates remain **NOT YET MEASURED**.
+
+The earlier report-target rescue results below are preserved as historical
+baseline evidence; their four-frame/three-second limits are superseded by the
+adaptive contracts above.
+
 ## Report-target rescue release — September 12, 2026
 
 Physical testing exposed a lifecycle failure rather than evidence fabrication:
@@ -15,13 +70,13 @@ pagehide, or End Session destroys it.
 The 222-image OpenALPR US set was rerun to separate possible remedies. These
 remain single-frame public-dataset results, not a physical-phone recovery rate.
 
-| evaluation | exact | character | coverage | non-empty wrong | conclusion |
-| --- | ---: | ---: | ---: | ---: | --- |
-| 640 detector, top 1 | 86.49% | 95.34% | 99.10% | 12.61% | retained |
-| 640 detector, top 2 | 86.49% | 95.34% | 99.10% | 12.61% | rejected: no recovery |
-| 640 detector, top 3 | 86.49% | 95.34% | 99.10% | 12.61% | rejected: no recovery |
-| 768 detector, top 1 | 86.04% | 96.25% | 99.55% | 13.51% | rejected: lower exact / more wrong |
-| 960 detector, top 1 | 86.94% | 95.80% | 98.20% | 11.26% | rejected: lower recall and slower |
+| evaluation          |  exact | character | coverage | non-empty wrong | conclusion                         |
+| ------------------- | -----: | --------: | -------: | --------------: | ---------------------------------- |
+| 640 detector, top 1 | 86.49% |    95.34% |   99.10% |          12.61% | retained                           |
+| 640 detector, top 2 | 86.49% |    95.34% |   99.10% |          12.61% | rejected: no recovery              |
+| 640 detector, top 3 | 86.49% |    95.34% |   99.10% |          12.61% | rejected: no recovery              |
+| 768 detector, top 1 | 86.04% |    96.25% |   99.55% |          13.51% | rejected: lower exact / more wrong |
+| 960 detector, top 1 | 86.94% |    95.80% |   98.20% |          11.26% | rejected: lower recall and slower  |
 
 A transport-crop simulation also compared 640/768/960 long edges at JPEG 90
 with the detector held at 640. Exact match was 77.03%, 84.23%, and 85.14%
@@ -51,11 +106,11 @@ Python 3.13.12. Measured 2026-09-11.
 
 ## Status
 
-| | |
-| --- | --- |
-| Plate feature status | **EXPERIMENTAL** |
-| Public-dataset validation | **PASS** — localization and US end-to-end, both reproducible |
-| Physical RoadLens validation | **NOT VERIFIED** |
+|                              |                                                              |
+| ---------------------------- | ------------------------------------------------------------ |
+| Plate feature status         | **EXPERIMENTAL**                                             |
+| Public-dataset validation    | **PASS** — localization and US end-to-end, both reproducible |
+| Physical RoadLens validation | **NOT VERIFIED**                                             |
 
 `EXPERIMENTAL`, not `READY`, and the reason is specific rather than cautious:
 no measurement here involved a phone camera pointed at a real vehicle, and the
@@ -65,14 +120,14 @@ bounded and tested; the domain evidence has a named hole in it.
 
 ## Plate detector
 
-| | |
-| --- | --- |
-| Model | `plate-yolo26n-640-v1`, SHA-256 `455dd221ac63…` |
-| Architecture | YOLO26n, single class `license_plate`, 640 px, 2.38 M parameters, 5.4 MB |
-| Base weights | Ultralytics YOLO26n, AGPL-3.0, hash verified before training |
-| Licence | AGPL-3.0 |
-| Training data | Open Images V7 `Vehicle registration plate`, 5,365 images / 7,846 boxes |
-| Epochs | Early-stopped at 60; best at epoch 45; 27 minutes wall clock |
+|               |                                                                          |
+| ------------- | ------------------------------------------------------------------------ |
+| Model         | `plate-yolo26n-640-v1`, SHA-256 `455dd221ac63…`                          |
+| Architecture  | YOLO26n, single class `license_plate`, 640 px, 2.38 M parameters, 5.4 MB |
+| Base weights  | Ultralytics YOLO26n, AGPL-3.0, hash verified before training             |
+| Licence       | AGPL-3.0                                                                 |
+| Training data | Open Images V7 `Vehicle registration plate`, 5,365 images / 7,846 boxes  |
+| Epochs        | Early-stopped at 60; best at epoch 45; 27 minutes wall clock             |
 
 The shipped checkpoint is the one the **validation** split chose, not the one
 that happened to score best on the US test set. An earlier checkpoint scored
@@ -83,11 +138,11 @@ number this project has.
 
 ### Localization
 
-| split | images | plates | precision | recall | mAP50 | mAP50-95 |
-| --- | --- | --- | --- | --- | --- | --- |
-| Open Images validation | 721 | 982 | 0.930 | 0.832 | 0.887 | 0.623 |
-| **Open Images test (held out)** | **2,054** | **2,824** | **0.936** | **0.819** | **0.877** | **0.612** |
-| OpenALPR US (IoU ≥ 0.5, conf 0.25) | 222 | 222 | 0.921 | **0.991** | — | — |
+| split                              | images    | plates    | precision | recall    | mAP50     | mAP50-95  |
+| ---------------------------------- | --------- | --------- | --------- | --------- | --------- | --------- |
+| Open Images validation             | 721       | 982       | 0.930     | 0.832     | 0.887     | 0.623     |
+| **Open Images test (held out)**    | **2,054** | **2,824** | **0.936** | **0.819** | **0.877** | **0.612** |
+| OpenALPR US (IoU ≥ 0.5, conf 0.25) | 222       | 222       | 0.921     | **0.991** | —         | —         |
 
 Inference is 1.4 ms per image at 640 px.
 
@@ -96,11 +151,11 @@ Inference is 1.4 ms per image at 640 px.
 Recall by plate width in source pixels, on the US benchmark:
 
 | plate width | plates | recall |
-| --- | --- | --- |
-| 0–24 px | 0 | — |
-| 24–48 px | 0 | — |
-| 48–96 px | 142 | 0.986 |
-| 96 px+ | 80 | 1.000 |
+| ----------- | ------ | ------ |
+| 0–24 px     | 0      | —      |
+| 24–48 px    | 0      | —      |
+| 48–96 px    | 142    | 0.986  |
+| 96 px+      | 80     | 1.000  |
 
 **Every plate in this benchmark is at least 48 px wide, so it says nothing at
 all about small plates** — which is exactly the regime that decides whether the
@@ -115,27 +170,27 @@ Measured on 222 ground-truth plate crops from the OpenALPR US benchmark, CUDA,
 RTX 5070 Ti. Crops come from the annotated boxes, so this isolates recognition
 from localization.
 
-| engine | preprocessing | exact | character | coverage | mean ms |
-| --- | --- | --- | --- | --- | --- |
-| fast-plate-ocr | **none** | **88.7 %** | **97.96 %** | 100 % | 4.5 |
-| fast-plate-ocr | gray | 88.3 % | 97.93 % | 100 % | 4.8 |
-| fast-plate-ocr | rectify | 87.4 % | 97.13 % | 100 % | 5.0 |
-| fast-plate-ocr | clahe | 86.9 % | 97.06 % | 100 % | 4.1 |
-| fast-plate-ocr | sharpen | 82.4 % | 96.02 % | 100 % | 4.2 |
-| rapidocr | clahe | 59.5 % | 79.15 % | 92.8 % | 109.9 |
-| rapidocr | rectify | 57.7 % | 78.13 % | 92.3 % | 112.2 |
-| rapidocr | gray | 55.9 % | 74.51 % | 86.0 % | 104.1 |
-| rapidocr | sharpen | 54.1 % | 78.33 % | 95.5 % | 109.3 |
-| rapidocr | none | 53.6 % | 74.58 % | 87.8 % | 105.0 |
+| engine         | preprocessing | exact      | character   | coverage | mean ms |
+| -------------- | ------------- | ---------- | ----------- | -------- | ------- |
+| fast-plate-ocr | **none**      | **88.7 %** | **97.96 %** | 100 %    | 4.5     |
+| fast-plate-ocr | gray          | 88.3 %     | 97.93 %     | 100 %    | 4.8     |
+| fast-plate-ocr | rectify       | 87.4 %     | 97.13 %     | 100 %    | 5.0     |
+| fast-plate-ocr | clahe         | 86.9 %     | 97.06 %     | 100 %    | 4.1     |
+| fast-plate-ocr | sharpen       | 82.4 %     | 96.02 %     | 100 %    | 4.2     |
+| rapidocr       | clahe         | 59.5 %     | 79.15 %     | 92.8 %   | 109.9   |
+| rapidocr       | rectify       | 57.7 %     | 78.13 %     | 92.3 %   | 112.2   |
+| rapidocr       | gray          | 55.9 %     | 74.51 %     | 86.0 %   | 104.1   |
+| rapidocr       | sharpen       | 54.1 %     | 78.33 %     | 95.5 %   | 109.3   |
+| rapidocr       | none          | 53.6 %     | 74.58 %     | 87.8 %   | 105.0   |
 
 **Selected: `fast-plate-ocr` 1.1.0 (MIT), `cct-s-v2-global-model`, no
 preprocessing.** 29.2 points more accurate and roughly 23× faster than the
 alternative on identical crops.
 
 The preprocessing result is the useful part of this table and it is not what one
-would guess. Every transformation we add *hurts* the chosen engine — it
+would guess. Every transformation we add _hurts_ the chosen engine — it
 normalises internally, so CLAHE and unsharp masking destroy information it was
-trained on. The same transformations *help* the general-purpose engine
+trained on. The same transformations _help_ the general-purpose engine
 (53.6 % → 59.5 %). That is why preprocessing stayed configurable instead of
 fixed, and why the default is `none`.
 
@@ -145,24 +200,24 @@ detail was never sampled.
 
 ### Candidates not measured
 
-| engine | why not |
-| --- | --- |
-| PaddleOCR / PP-OCR (native) | `paddlepaddle-gpu` on Windows supports at most CUDA 12.9, while this worker runs CUDA 13.0 with PyTorch cu130. Installing a second, conflicting CUDA runtime into the verified worker environment was a worse trade than the possible gain — and PP-OCR's recognition models *were* measured, through RapidOCR's ONNX export of them. |
-| EasyOCR | A general-purpose CRNN with the same weakness RapidOCR showed: it reads every string in the crop and must then be told which is the plate. With the selected engine at 88.7 % and 4.5 ms, adding scipy and scikit-image to a verified worker environment for a likely-worse candidate was not justified. Recorded as **not measured**, not as rejected on evidence. |
+| engine                      | why not                                                                                                                                                                                                                                                                                                                                                             |
+| --------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| PaddleOCR / PP-OCR (native) | `paddlepaddle-gpu` on Windows supports at most CUDA 12.9, while this worker runs CUDA 13.0 with PyTorch cu130. Installing a second, conflicting CUDA runtime into the verified worker environment was a worse trade than the possible gain — and PP-OCR's recognition models _were_ measured, through RapidOCR's ONNX export of them.                               |
+| EasyOCR                     | A general-purpose CRNN with the same weakness RapidOCR showed: it reads every string in the crop and must then be told which is the plate. With the selected engine at 88.7 % and 4.5 ms, adding scipy and scikit-image to a verified worker environment for a likely-worse candidate was not justified. Recorded as **not measured**, not as rejected on evidence. |
 
 ## End-to-end, US domain
 
 Full pipeline over whole photographs: our detector picks its own plate, then
 reads it. 222 images, OpenALPR US benchmark.
 
-| | |
-| --- | --- |
-| Detector precision (IoU ≥ 0.5) | 0.921 |
-| Detector recall (IoU ≥ 0.5) | 0.991 |
-| **Exact plate string** | **86.5 %** |
-| **Character accuracy** | **95.3 %** |
-| Coverage (produced any reading) | 99.1 % |
-| Latency median / mean / p95 | 14.1 / 14.9 / 17.1 ms |
+|                                 |                       |
+| ------------------------------- | --------------------- |
+| Detector precision (IoU ≥ 0.5)  | 0.921                 |
+| Detector recall (IoU ≥ 0.5)     | 0.991                 |
+| **Exact plate string**          | **86.5 %**            |
+| **Character accuracy**          | **95.3 %**            |
+| Coverage (produced any reading) | 99.1 %                |
+| Latency median / mean / p95     | 14.1 / 14.9 / 17.1 ms |
 
 Localization costs about 2.2 points against the 88.7 % ceiling the same OCR
 reaches from ground-truth boxes, so recognition — not detection — is the
@@ -178,11 +233,11 @@ table. Single frames are all the public benchmark contains.
 `npm run plate:benchmark` — YOLO26s at 640 on the permitted project photograph,
 same process, same GPU, 60 frames per condition.
 
-| condition | analysis Hz | total ms (median) | GPU inference ms | Δ vs baseline |
-| --- | --- | --- | --- | --- |
-| baseline — no plate support | 71.91 | 13.91 | 7.34 | reference |
-| loaded — plate models resident, never invoked | 71.18 | 14.05 | 7.39 | −1.0 % |
-| interleaved — a plate read every 4th frame | 71.23 | 14.04 | 7.45 | −0.9 % |
+| condition                                     | analysis Hz | total ms (median) | GPU inference ms | Δ vs baseline |
+| --------------------------------------------- | ----------- | ----------------- | ---------------- | ------------- |
+| baseline — no plate support                   | 71.91       | 13.91             | 7.34             | reference     |
+| loaded — plate models resident, never invoked | 71.18       | 14.05             | 7.39             | −1.0 %        |
+| interleaved — a plate read every 4th frame    | 71.23       | 14.04             | 7.45             | −0.9 %        |
 
 Across three repeat runs the deltas spanned **−1.6 % to +2.7 %**, straddling zero
 in both directions. That spread is run-to-run variation, not a cost and
@@ -190,10 +245,10 @@ certainly not a speed-up: **plate support makes no measurable difference to
 traffic analysis throughput.** The traffic benchmark is also unchanged —
 YOLO26s still measures 7.75 ms inference / 14.11 ms total, as before this work.
 
-| plate read | value |
-| --- | --- |
+| plate read   | value                             |
+| ------------ | --------------------------------- |
 | median total | 13.05 ms (8.58 detect + 3.34 OCR) |
-| p95 total | 39.13 ms |
+| p95 total    | 39.13 ms                          |
 
 The `interleaved` row is deliberately pessimistic: it reads a plate every fourth
 frame, where the shipped bounds allow at most four reads for an entire track.
@@ -202,47 +257,47 @@ runs in a gap where no analysis frame is waiting.
 
 ## Multi-frame consensus
 
-| | |
-| --- | --- |
-| Implemented | Weighted voting with confusable-glyph grouping and per-position resolution |
-| Minimum supporting frames | 2 |
-| Minimum confidence | 0.55 |
-| Behaviour below either floor | `plateText = null`, UI shows "Unreadable" |
-| Tests | `tests/unit/plates.test.ts` — agreement, ambiguous-position resolution, never inventing characters, lone-frame rejection, weak-agreement rejection, blank readings counted against |
+|                              |                                                                                                                                                                                    |
+| ---------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Implemented                  | Weighted voting with confusable-glyph grouping and per-position resolution                                                                                                         |
+| Minimum supporting frames    | 2                                                                                                                                                                                  |
+| Minimum confidence           | 0.55                                                                                                                                                                               |
+| Behaviour below either floor | `plateText = null`, UI shows "Unreadable"                                                                                                                                          |
+| Tests                        | `tests/unit/plates.test.ts` — agreement, ambiguous-position resolution, never inventing characters, lone-frame rejection, weak-agreement rejection, blank readings counted against |
 
 ## Privacy
 
-| check | result |
-| --- | --- |
-| Worker retains no crop, reading or history between requests | PASS — `worker/tests/test_plate_connection.py` |
-| Phone state is RAM-only and epoch-scoped | PASS — `tests/unit/plates.test.ts` reset test |
-| No plate database, archive, telemetry or local storage | PASS — `scripts/check-no-persistence.mjs` |
-| No plate strings, images, dataset credentials or secrets committed | PASS — `scripts/check-plate-privacy.mjs` |
-| No plate text on the live overlay | PASS — by design; plates appear only in report cards |
-| End session clears plate state | PASS — same teardown as reports and calibration |
+| check                                                              | result                                               |
+| ------------------------------------------------------------------ | ---------------------------------------------------- |
+| Worker retains no crop, reading or history between requests        | PASS — `worker/tests/test_plate_connection.py`       |
+| Phone state is RAM-only and epoch-scoped                           | PASS — `tests/unit/plates.test.ts` reset test        |
+| No plate database, archive, telemetry or local storage             | PASS — `scripts/check-no-persistence.mjs`            |
+| No plate strings, images, dataset credentials or secrets committed | PASS — `scripts/check-plate-privacy.mjs`             |
+| No plate text on the live overlay                                  | PASS — by design; plates appear only in report cards |
+| End session clears plate state                                     | PASS — same teardown as reports and calibration      |
 
 ## Test coverage
 
-| suite | before | after |
-| --- | --- | --- |
-| Unit | 189 | 223 |
-| Contracts | 49 | 85 |
-| Integration | 62 | 80 |
-| Worker (pytest) | 40 + 68 subtests | 90 + 135 subtests |
-| E2E / privacy / model | 12 / 10 / 11 | unchanged, all passing |
+| suite                 | before           | after                  |
+| --------------------- | ---------------- | ---------------------- |
+| Unit                  | 189              | 223                    |
+| Contracts             | 49               | 85                     |
+| Integration           | 62               | 80                     |
+| Worker (pytest)       | 40 + 68 subtests | 90 + 135 subtests      |
+| E2E / privacy / model | 12 / 10 / 11     | unchanged, all passing |
 
 ## Live deployment verification
 
 Run against the deployed services on 2026-09-11, with the Render relay still on
-the commit *before* this work.
+the commit _before_ this work.
 
-| check | result |
-| --- | --- |
-| Worker loads the plate pipeline | PASS — `Plate recognition ready.` |
+| check                                                | result                                                   |
+| ---------------------------------------------------- | -------------------------------------------------------- |
+| Worker loads the plate pipeline                      | PASS — `Plate recognition ready.`                        |
 | Worker connects to a relay **without** plate support | PASS — `GPU WORKER READY`, relay reported `state: ready` |
-| Worker advertises plate to that relay | Correctly **not** advertised |
-| Frontend deployed and serving | PASS — Vercel, favicon 404 → 200 |
-| Cloud smoke (paired browsers, real model) | PASS |
+| Worker advertises plate to that relay                | Correctly **not** advertised                             |
+| Frontend deployed and serving                        | PASS — Vercel, favicon 404 → 200                         |
+| Cloud smoke (paired browsers, real model)            | PASS                                                     |
 
 The second row is the one that matters. `worker.ready` is a strict schema, so a
 worker announcing a `plate` descriptor to that relay would have been rejected and

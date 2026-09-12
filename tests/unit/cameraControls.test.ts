@@ -1,6 +1,10 @@
 import { describe, expect, it } from "vitest";
 import { CameraCapture } from "../../frontend/src/camera/capture";
 import type { FrameRateChoice } from "../../frontend/src/camera/frameRate";
+import {
+  cameraSourceConstraints,
+  cameraSourceStatus,
+} from "../../frontend/src/camera/sourceProfile";
 
 function fakeVideo() {
   return {
@@ -25,7 +29,7 @@ function fakeVideo() {
 
 function fakeTrack(
   capabilities: unknown,
-  settings: { frameRate?: number },
+  settings: { frameRate?: number; width?: number; height?: number },
   options: { reject?: boolean; selects?: number } = {},
 ) {
   const applied: unknown[] = [];
@@ -124,6 +128,51 @@ describe("camera frame rate control", () => {
     instance.end();
     expect(instance.frameRate).toBe("auto" satisfies FrameRateChoice);
     expect(instance.analysisRate).toBe("auto");
+  });
+});
+
+describe("camera source profiles", () => {
+  it("requests 1080p-class input as a preference and reports actual settings", () => {
+    expect(cameraSourceConstraints("showcase")).toMatchObject({
+      width: { ideal: 1920 },
+      height: { ideal: 1080 },
+      frameRate: { ideal: 30 },
+      facingMode: { ideal: "environment" },
+    });
+    expect(
+      cameraSourceStatus(
+        "showcase",
+        {
+          width: { max: 3840 },
+          height: { max: 2160 },
+          frameRate: { max: 60 },
+          focusMode: ["manual", "continuous"],
+        },
+        { width: 1920, height: 1080, frameRate: 30 },
+      ),
+    ).toMatchObject({
+      requestedWidth: 1920,
+      requestedHeight: 1080,
+      actualWidth: 1920,
+      actualHeight: 1080,
+      actualFrameRate: 30,
+      supports1080: true,
+      continuousFocusAvailable: true,
+    });
+  });
+
+  it("falls back without failing when a live track rejects Showcase", async () => {
+    const track = fakeTrack(
+      { width: { max: 1280 }, height: { max: 720 } },
+      { width: 1280, height: 720, frameRate: 30 },
+      { reject: true },
+    );
+    const { instance } = capture(track);
+    const result = await instance.applySourceProfile("showcase");
+    expect(result).toMatchObject({ applied: false, fallback: true });
+    expect(instance.sourceProfile).toBe("standard");
+    expect(track.applied).toHaveLength(2);
+    instance.end();
   });
 });
 

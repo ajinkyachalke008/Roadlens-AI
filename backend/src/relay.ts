@@ -818,6 +818,8 @@ export function createRelay(config: RelayConfig) {
              * directions.
              */
             frameProtocol: 2,
+            /** Adaptive report metadata and separately requested detail images. */
+            reportProtocol: 2,
             connectionId: member.id,
             role: hello.role,
             ...(hello.role === "viewer" ? { viewerId: member.id } : {}),

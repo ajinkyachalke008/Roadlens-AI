@@ -1,4 +1,4 @@
-import { LIMITS } from "../../../shared/src/limits";
+import { LIMITS, PLATE_LIMITS } from "../../../shared/src/limits";
 import {
   ReportSchema,
   FrameSchema,
@@ -16,11 +16,29 @@ export type PlateFields = Pick<
   | "plateConfidence"
   | "plateSupportingFrames"
   | "plateDetectorConfidence"
+  | "plateCandidateText"
+  | "plateCandidateConfidence"
+  | "plateCandidateSupportingFrames"
+  | "plateAttemptFrames"
+  | "plateLocalizedFrames"
+  | "plateReadableFrames"
 >;
+export interface ReportArtifactInput {
+  blob: Blob;
+  frameId: string;
+  sourceTimeMs: number;
+  width: number;
+  height: number;
+  quality: number;
+  sharpness: number;
+}
+type ArtifactKind = "vehicle" | "plate";
 export class SessionStore {
   readonly reports = new Map<string, Report>();
   private images = new Map<string, Blob>();
   private imageBytes = 0;
+  private details = new Map<string, Blob>();
+  private detailBytes = 0;
   private episodes = new Map<string, string>();
   constructor(private authoritative = true) {}
   onChange = () => {};
@@ -29,11 +47,32 @@ export class SessionStore {
     ReportSchema.parse(report);
     const old = this.reports.get(report.reportId);
     if (old && old.revision >= report.revision) return false;
+    if (
+      old?.bestCapture &&
+      (old.bestCapture.imageId !== report.bestCapture?.imageId ||
+        report.bestCapture?.state === "evicted")
+    )
+      this.removeDetail(old.bestCapture.imageId);
+    if (
+      old?.bestPlateDetail &&
+      (old.bestPlateDetail.imageId !== report.bestPlateDetail?.imageId ||
+        report.bestPlateDetail?.state === "evicted")
+    )
+      this.removeDetail(old.bestPlateDetail.imageId);
+    if (
+      old?.evidenceId &&
+      (old.evidenceId !== report.evidenceId ||
+        report.evidenceState === "evicted")
+    )
+      this.removeImage(old.evidenceId);
     this.reports.set(report.reportId, structuredClone(report));
     while (this.reports.size > LIMITS.reports) {
       const first = this.reports.keys().next().value!;
       const evicted = this.reports.get(first)!;
       if (evicted.evidenceId) this.removeImage(evicted.evidenceId);
+      if (evicted.bestCapture) this.removeDetail(evicted.bestCapture.imageId);
+      if (evicted.bestPlateDetail)
+        this.removeDetail(evicted.bestPlateDetail.imageId);
       this.reports.delete(first);
     }
     this.onChange();
@@ -46,9 +85,18 @@ export class SessionStore {
       this.images.delete(id);
     }
   }
+  private removeDetail(id: string) {
+    const image = this.details.get(id);
+    if (image) {
+      this.detailBytes -= image.size;
+      this.details.delete(id);
+    }
+  }
   retain(id: string, blob: Blob) {
     if (blob.size > LIMITS.evidenceBytes) return false;
-    this.removeImage(id);
+    // Event evidence is historical: a later, prettier frame must never replace
+    // the bytes associated with its original id.
+    if (this.images.has(id)) return true;
     this.images.set(id, blob);
     this.imageBytes += blob.size;
     while (
@@ -77,18 +125,109 @@ export class SessionStore {
     return true;
   }
   image(id: string) {
-    const image = this.images.get(id);
-    if (image) {
+    const image = this.images.get(id) ?? this.details.get(id);
+    if (this.images.has(id)) {
       this.images.delete(id);
-      this.images.set(id, image);
+      this.images.set(id, image!);
+    } else if (this.details.has(id)) {
+      this.details.delete(id);
+      this.details.set(id, image!);
     }
     return image;
+  }
+  /** Retain an image returned by the camera under the matching RAM budget. */
+  retainRequested(id: string, blob: Blob) {
+    const detail = [...this.reports.values()].some(
+      (report) =>
+        report.bestCapture?.imageId === id ||
+        report.bestPlateDetail?.imageId === id,
+    );
+    return detail ? this.retainDetail(id, blob) : this.retain(id, blob);
   }
   get evidenceCount() {
     return this.images.size;
   }
   get evidenceSize() {
     return this.imageBytes;
+  }
+  get detailCount() {
+    return this.details.size;
+  }
+  get detailSize() {
+    return this.detailBytes;
+  }
+
+  private retainDetail(id: string, blob: Blob) {
+    if (blob.size > PLATE_LIMITS.jpegBytes) return false;
+    this.removeDetail(id);
+    this.details.set(id, blob);
+    this.detailBytes += blob.size;
+    while (
+      this.details.size > PLATE_LIMITS.detailImages ||
+      this.detailBytes > PLATE_LIMITS.detailBytes
+    ) {
+      const first = this.details.keys().next().value!;
+      this.removeDetail(first);
+      for (const report of this.reports.values()) {
+        const key =
+          report.bestCapture?.imageId === first
+            ? "bestCapture"
+            : report.bestPlateDetail?.imageId === first
+              ? "bestPlateDetail"
+              : null;
+        if (!key || !this.authoritative) continue;
+        const next: Report = {
+          ...report,
+          [key]: { ...report[key]!, state: "evicted" as const },
+          revision: report.revision + 1,
+          updatedAt: new Date().toISOString(),
+        };
+        this.reports.set(next.reportId, next);
+        this.onReport(next);
+      }
+    }
+    this.onChange();
+    return true;
+  }
+
+  /** Publish only meaningful best-capture replacements as report revisions. */
+  applyArtifact(
+    reportId: string,
+    kind: ArtifactKind,
+    artifact: ReportArtifactInput,
+  ) {
+    const initial = this.reports.get(reportId);
+    if (!initial) return false;
+    const key = kind === "vehicle" ? "bestCapture" : "bestPlateDetail";
+    const previous = initial[key];
+    const imageId = crypto.randomUUID();
+    if (!this.retainDetail(imageId, artifact.blob)) return false;
+    const old = this.reports.get(reportId);
+    if (!old) {
+      this.removeDetail(imageId);
+      return false;
+    }
+    if (previous) this.removeDetail(previous.imageId);
+    const next: Report = {
+      ...old,
+      [key]: {
+        imageId,
+        state: "available",
+        frameId: artifact.frameId,
+        sourceTimeMs: artifact.sourceTimeMs,
+        width: artifact.width,
+        height: artifact.height,
+        quality: artifact.quality,
+        sharpness: artifact.sharpness,
+      },
+      revision: old.revision + 1,
+      updatedAt: new Date().toISOString(),
+    };
+    ReportSchema.parse(next);
+    this.reports.set(reportId, next);
+    this.onChange();
+    this.onReport(next);
+    return true;
   }
   /**
    * Apply a plate consensus to an existing report.
@@ -107,7 +246,15 @@ export class SessionStore {
       (old.plateConfidence ?? null) === (plate.plateConfidence ?? null) &&
       (old.plateSupportingFrames ?? 0) === (plate.plateSupportingFrames ?? 0) &&
       (old.plateDetectorConfidence ?? null) ===
-        (plate.plateDetectorConfidence ?? null)
+        (plate.plateDetectorConfidence ?? null) &&
+      (old.plateCandidateText ?? null) === (plate.plateCandidateText ?? null) &&
+      (old.plateCandidateConfidence ?? null) ===
+        (plate.plateCandidateConfidence ?? null) &&
+      (old.plateCandidateSupportingFrames ?? 0) ===
+        (plate.plateCandidateSupportingFrames ?? 0) &&
+      (old.plateAttemptFrames ?? 0) === (plate.plateAttemptFrames ?? 0) &&
+      (old.plateLocalizedFrames ?? 0) === (plate.plateLocalizedFrames ?? 0) &&
+      (old.plateReadableFrames ?? 0) === (plate.plateReadableFrames ?? 0)
     )
       return false;
     const next: Report = {
@@ -225,27 +372,20 @@ export class SessionStore {
     );
     if (!track || track.speedMps === null || frame.calibrationVersion === null)
       throw new Error("A speed candidate requires a qualified observed track");
-    if (blob && old.evidenceId) this.retain(old.evidenceId, blob);
+    // The original event image remains immutable. Improving vehicle/plate
+    // imagery is published through applyArtifact under a different image id.
     const next: Report = {
       ...old,
       revision: old.revision + 1,
-      sourceId: frame.sourceId,
-      captureEpoch: frame.captureEpoch,
-      frameId: frame.frameId,
       trackId,
-      sourceMode: frame.sourceMode,
-      sourceTimeMs: frame.sourceTimeMs,
-      capturedAtIso: frame.capturedAtIso,
       kind: "speed_candidate",
       className: track.className,
       score: track.score,
       speedMps: track.speedMps,
       policy: structuredClone(policy),
       calibrationVersion: frame.calibrationVersion,
-      modelId: frame.modelId,
-      modelSha256: frame.modelSha256,
-      detectorProfile: frame.detectorProfile,
-      trackerVersion: frame.trackerVersion,
+      measurementFrameId: frame.frameId,
+      measurementSourceTimeMs: frame.sourceTimeMs,
       validityReasons: [],
       evidenceSummary: structuredClone(summary),
       ...(plate ?? {}),
@@ -286,6 +426,8 @@ export class SessionStore {
     this.reports.clear();
     this.images.clear();
     this.imageBytes = 0;
+    this.details.clear();
+    this.detailBytes = 0;
     this.episodes.clear();
     this.onChange();
   }

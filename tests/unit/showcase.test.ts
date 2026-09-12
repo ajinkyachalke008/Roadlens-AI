@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   SHOWCASE_ARMING_MS,
+  SHOWCASE_TARGET_WAIT_MS,
   SHOWCASE_WAIT_MS,
   ShowcaseController,
   eligibleShowcaseTrack,
@@ -132,7 +133,7 @@ describe("Showcase source-time state machine", () => {
     });
   });
 
-  it("cannot target or report before five seconds of real analyzed source time", () => {
+  it("cannot target or report before the minimum arming delay", () => {
     const controller = new ShowcaseController();
     controller.setEnabled(true);
     expect(controller.onFrame(analysed(100))).toBeNull();
@@ -148,8 +149,9 @@ describe("Showcase source-time state machine", () => {
       controller.onFrame(analysed(100 + SHOWCASE_ARMING_MS))?.trackId,
     ).toBe(1);
     expect(controller.snapshot()).toMatchObject({
-      phase: "target_acquired",
+      phase: "target_ready",
       targetTrackId: 1,
+      triggerReason: "capture_quality",
     });
   });
 
@@ -165,7 +167,7 @@ describe("Showcase source-time state machine", () => {
       ),
     ).toBeNull();
     expect(showcaseStatusLabel(controller.snapshot())).toBe(
-      "Waiting for vehicle…",
+      "Looking for clear vehicle…",
     );
     expect(controller.snapshot().targetTrackId).toBeNull();
     expect(
@@ -186,7 +188,7 @@ describe("Showcase source-time state machine", () => {
     controller.onFrame(analysed(0));
     expect(controller.onFrame(analysed(5_000))?.trackId).toBe(1);
     expect(controller.markReportCreated("report-1", "pending")).toMatchObject({
-      phase: "plate_pending",
+      phase: "plate_collecting",
       targetTrackId: 1,
       reportId: "report-1",
     });
@@ -194,13 +196,151 @@ describe("Showcase source-time state machine", () => {
       controller.onFrame(analysed(6_000, [track({ trackId: 9 })])),
     ).toBeNull();
     expect(controller.updatePlate("unreadable")).toMatchObject({
-      phase: "complete",
+      phase: "plate_unreadable",
       targetTrackId: 1,
       reportId: "report-1",
     });
     expect(
       controller.onFrame(analysed(20_000, [track({ trackId: 22 })])),
     ).toBeNull();
+  });
+
+  it("waits through small and medium looks, locks once, then fires on a sharper larger frame", () => {
+    const controller = new ShowcaseController();
+    controller.setEnabled(true);
+    controller.onFrame(analysed(0, []));
+    const qualities = (sharpness: number, quality: number) =>
+      new Map([[1, { sharpness, quality }]]);
+    expect(
+      controller.onFrame(
+        analysed(SHOWCASE_ARMING_MS, [
+          track({ bbox: [0.44, 0.4, 0.56, 0.54] }),
+        ]),
+        new Set(),
+        qualities(3, 0.35),
+      ),
+    ).toBeNull();
+    expect(
+      controller.onFrame(
+        analysed(SHOWCASE_ARMING_MS + 400, [
+          track({ bbox: [0.36, 0.32, 0.64, 0.64] }),
+        ]),
+        new Set(),
+        qualities(5, 0.48),
+      ),
+    ).toBeNull();
+    expect(
+      controller.onFrame(
+        analysed(SHOWCASE_ARMING_MS + 800, [
+          track({ bbox: [0.34, 0.3, 0.66, 0.66] }),
+        ]),
+        new Set(),
+        qualities(5, 0.5),
+      ),
+    ).toBeNull();
+    expect(controller.snapshot()).toMatchObject({
+      phase: "acquiring",
+      targetTrackId: 1,
+    });
+    const ready = controller.onFrame(
+      analysed(SHOWCASE_ARMING_MS + 1_200, [
+        track({ bbox: [0.2, 0.16, 0.8, 0.82] }),
+      ]),
+      new Set(),
+      qualities(20, 0.9),
+    );
+    expect(ready?.trackId).toBe(1);
+    expect(controller.snapshot()).toMatchObject({
+      phase: "target_ready",
+      triggerReason: "capture_quality",
+      growth: "growing",
+    });
+  });
+
+  it("does not switch to a more attractive vehicle after target lock", () => {
+    const controller = new ShowcaseController();
+    controller.setEnabled(true);
+    controller.onFrame(analysed(0, []));
+    const moderate = new Map([[1, { sharpness: 5, quality: 0.5 }]]);
+    controller.onFrame(
+      analysed(SHOWCASE_ARMING_MS, [track({ bbox: [0.35, 0.3, 0.65, 0.65] })]),
+      new Set(),
+      moderate,
+    );
+    controller.onFrame(
+      analysed(SHOWCASE_ARMING_MS + 900, [
+        track({ bbox: [0.34, 0.29, 0.66, 0.66] }),
+      ]),
+      new Set(),
+      moderate,
+    );
+    expect(controller.snapshot().targetTrackId).toBe(1);
+    controller.onFrame(
+      analysed(SHOWCASE_ARMING_MS + 1_200, [
+        track({ bbox: [0.33, 0.28, 0.67, 0.67] }),
+        track({ trackId: 9, bbox: [0.15, 0.12, 0.85, 0.88] }),
+      ]),
+      new Set(),
+      new Map([
+        [1, { sharpness: 5, quality: 0.5 }],
+        [9, { sharpness: 25, quality: 0.95 }],
+      ]),
+    );
+    expect(controller.snapshot().targetTrackId).toBe(1);
+  });
+
+  it("can fire on a strong localized plate before OCR text exists", () => {
+    const controller = new ShowcaseController();
+    controller.setEnabled(true);
+    controller.onFrame(analysed(0, []));
+    const quality = new Map([[1, { sharpness: 4, quality: 0.45 }]]);
+    const moderate = [track({ bbox: [0.38, 0.34, 0.62, 0.62] })];
+    controller.onFrame(
+      analysed(SHOWCASE_ARMING_MS, moderate),
+      new Set(),
+      quality,
+    );
+    controller.onFrame(
+      analysed(SHOWCASE_ARMING_MS + 900, moderate),
+      new Set(),
+      quality,
+    );
+    expect(
+      controller.onFrame(
+        analysed(SHOWCASE_ARMING_MS + 1_200, moderate),
+        new Set(),
+        quality,
+        new Set([1]),
+      )?.trackId,
+    ).toBe(1);
+    expect(controller.snapshot().triggerReason).toBe("plate_localized");
+  });
+
+  it("uses a bounded target wait instead of hanging for perfect quality", () => {
+    const controller = new ShowcaseController();
+    controller.setEnabled(true);
+    controller.onFrame(analysed(0, []));
+    const quality = new Map([[1, { sharpness: 4, quality: 0.45 }]]);
+    const moderate = [track({ bbox: [0.38, 0.34, 0.62, 0.62] })];
+    controller.onFrame(
+      analysed(SHOWCASE_ARMING_MS, moderate),
+      new Set(),
+      quality,
+    );
+    controller.onFrame(
+      analysed(SHOWCASE_ARMING_MS + 900, moderate),
+      new Set(),
+      quality,
+    );
+    const lockedAt = controller.snapshot().targetLockedAtMs!;
+    expect(
+      controller.onFrame(
+        analysed(lockedAt + SHOWCASE_TARGET_WAIT_MS, moderate),
+        new Set(),
+        quality,
+      )?.trackId,
+    ).toBe(1);
+    expect(controller.snapshot().triggerReason).toBe("target_wait_expired");
   });
 
   it("never carries a target across a capture epoch", () => {

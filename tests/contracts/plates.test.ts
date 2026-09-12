@@ -255,6 +255,60 @@ describe("Report compatibility with plate fields", () => {
       ReportSchema.parse({ ...report(), plateText: "ABC1234" }),
     ).toThrow();
   });
+  it("keeps a strong one-frame candidate separate from confirmed plate text", () => {
+    const parsed = ReportSchema.parse({
+      ...report(),
+      plateStatus: "pending",
+      plateText: null,
+      plateConfidence: null,
+      plateSupportingFrames: 1,
+      plateDetectorConfidence: 0.9,
+      plateCandidateText: "ABC1234",
+      plateCandidateConfidence: 0.94,
+      plateCandidateSupportingFrames: 1,
+      plateAttemptFrames: 1,
+      plateLocalizedFrames: 1,
+      plateReadableFrames: 1,
+    });
+    expect(parsed.plateText).toBeNull();
+    expect(parsed.plateCandidateText).toBe("ABC1234");
+    expect(() =>
+      ReportSchema.parse({
+        ...parsed,
+        plateStatus: "read",
+        plateText: "ABC1234",
+        plateConfidence: 0.94,
+        plateSupportingFrames: 2,
+      }),
+    ).toThrow();
+  });
+  it("accepts separately identified RAM-only best-capture metadata", () => {
+    expect(
+      ReportSchema.parse({
+        ...report(),
+        bestCapture: {
+          imageId: uuid(91),
+          state: "available",
+          frameId: report().frameId,
+          sourceTimeMs: report().sourceTimeMs,
+          width: 1024,
+          height: 576,
+          quality: 0.82,
+          sharpness: 12.4,
+        },
+        bestPlateDetail: {
+          imageId: uuid(92),
+          state: "available",
+          frameId: report().frameId,
+          sourceTimeMs: report().sourceTimeMs,
+          width: 92,
+          height: 28,
+          quality: 0.78,
+          sharpness: 11,
+        },
+      }).bestCapture?.width,
+    ).toBe(1024);
+  });
   it("keeps a plate-bearing report inside the report byte budget", () => {
     const full = ReportSchema.parse({
       ...report(),

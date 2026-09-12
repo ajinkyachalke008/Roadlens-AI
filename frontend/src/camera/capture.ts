@@ -1,8 +1,5 @@
 import { DetectorClient } from "../inference/client";
-import {
-  TimeAwareTrackerV2,
-  TRACKER_V2_VERSION,
-} from "../tracking/trackerV2";
+import { TimeAwareTrackerV2, TRACKER_V2_VERSION } from "../tracking/trackerV2";
 import { estimateSpeed, type SpeedEstimate } from "../geometry/speed";
 import type { Calibration } from "../geometry/calibration";
 import { BackgroundGuard } from "../geometry/background";
@@ -32,6 +29,11 @@ import {
   type GpuDiagnostics,
 } from "../inference/remote";
 import type { DetectionResult } from "../inference/types";
+import {
+  cameraSourceConstraints,
+  cameraSourceStatus,
+  type CameraSourceProfile,
+} from "./sourceProfile";
 export interface CompletedFrame {
   result: FrameResult;
   /** Internal tracker fact; never serialized or sent through the relay. */
@@ -225,11 +227,12 @@ export class CameraCapture {
   frameRate: FrameRateChoice = "auto";
   /** Operator analysis-rate request in FPS; "auto" uses the measured controller. */
   analysisRate: "auto" | number = "auto";
+  /** Selected before camera start; Showcase prefers real source pixels over FPS. */
+  sourceProfile: CameraSourceProfile = "standard";
   private track: MediaStreamTrack | null = null;
-  private readonly baseVideoConstraints: MediaTrackConstraints = {
-    width: { ideal: 1280 },
-    height: { ideal: 720 },
-  };
+  private videoConstraints() {
+    return cameraSourceConstraints(this.sourceProfile);
+  }
   /** Live presentation time now. Display-side overlay age only. */
   sourceTimeNow(now = performance.now()) {
     if (this.sourceMode === "replay_video")
@@ -256,6 +259,53 @@ export class CameraCapture {
       note: frameRateNote(this.frameRate, actual),
     };
   }
+  get cameraSource() {
+    const track = this.track;
+    let settings: MediaTrackSettings | null = null;
+    let capabilities: MediaTrackCapabilities | null = null;
+    try {
+      settings = track?.getSettings?.() ?? null;
+      capabilities = track?.getCapabilities?.() ?? null;
+    } catch {
+      // Safari may expose the methods without returning every property.
+    }
+    return cameraSourceStatus(
+      this.sourceProfile,
+      capabilities as Parameters<typeof cameraSourceStatus>[1],
+      settings as Parameters<typeof cameraSourceStatus>[2],
+      { width: this.video.videoWidth, height: this.video.videoHeight },
+    );
+  }
+  /**
+   * Re-apply a profile to an existing track and verify the result through
+   * getSettings(). A rejected Showcase preference falls back to the standard
+   * preference without failing the camera session.
+   */
+  async applySourceProfile(profile: CameraSourceProfile) {
+    this.sourceProfile = profile;
+    const track = this.track;
+    if (!track?.applyConstraints)
+      return { applied: false, fallback: false, status: this.cameraSource };
+    try {
+      await track.applyConstraints(this.videoConstraints());
+      if (this.running) this.resetEpoch();
+      return { applied: true, fallback: false, status: this.cameraSource };
+    } catch {
+      if (profile === "showcase") {
+        this.sourceProfile = "standard";
+        try {
+          await track.applyConstraints(this.videoConstraints());
+        } catch {
+          // The already-live track remains usable with its browser-selected mode.
+        }
+      }
+      return {
+        applied: false,
+        fallback: profile === "showcase",
+        status: this.cameraSource,
+      };
+    }
+  }
   /**
    * Ask the track for a rate and report what it actually selected. A camera
    * reconfiguration invalidates timing continuity, so measurement restarts.
@@ -268,8 +318,8 @@ export class CameraCapture {
     try {
       await track.applyConstraints(
         choice === "auto"
-          ? { ...this.baseVideoConstraints }
-          : { ...this.baseVideoConstraints, frameRate: { ideal: choice } },
+          ? this.videoConstraints()
+          : { ...this.videoConstraints(), frameRate: { ideal: choice } },
       );
     } catch {
       return { applied: false, status: this.cameraFrameRate };
@@ -358,10 +408,12 @@ export class CameraCapture {
     profile: 416 | 320 = 416,
     file?: File | null,
     remote?: RemoteDetector,
+    sourceProfile: CameraSourceProfile = "standard",
   ) {
     this.pause(false);
     const generation = ++this.generation;
     this.browserProfile = profile;
+    this.sourceProfile = sourceProfile;
     this.sourceFrames = 0;
     this.skippedFrames = 0;
     this.duplicateFrames = 0;
@@ -396,11 +448,7 @@ export class CameraCapture {
           throw new Error("Camera needs HTTPS and a supported browser");
         const stream = await navigator.mediaDevices.getUserMedia({
           audio: false,
-          video: {
-            facingMode: { ideal: "environment" },
-            width: { ideal: 1280 },
-            height: { ideal: 720 },
-          },
+          video: this.videoConstraints(),
         });
         if (generation !== this.generation) {
           stream.getTracks().forEach((t) => t.stop());
@@ -409,6 +457,8 @@ export class CameraCapture {
         this.stream = stream;
         this.video.srcObject = stream;
         this.track = stream.getVideoTracks()[0] ?? null;
+        if (this.sourceProfile === "showcase")
+          await this.applySourceProfile("showcase");
         if (this.frameRate !== "auto")
           await this.applyFrameRate(this.frameRate);
         stream.getVideoTracks().forEach((t) =>
@@ -932,5 +982,6 @@ export class CameraCapture {
     this.mounted = false;
     this.frameRate = "auto";
     this.analysisRate = "auto";
+    this.sourceProfile = "standard";
   }
 }

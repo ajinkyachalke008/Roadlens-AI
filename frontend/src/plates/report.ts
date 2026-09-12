@@ -17,6 +17,12 @@ export function plateFields(state: PlateTrackState): PlateFields | null {
       plateConfidence: state.plateConfidence,
       plateSupportingFrames: state.supportingFrames,
       plateDetectorConfidence: state.detectorConfidence,
+      plateCandidateText: null,
+      plateCandidateConfidence: null,
+      plateCandidateSupportingFrames: 0,
+      plateAttemptFrames: state.distinctFrames ?? 0,
+      plateLocalizedFrames: state.localizedFrames ?? 0,
+      plateReadableFrames: state.readableFrames ?? 0,
     };
   return {
     plateStatus: state.status === "read" ? "unreadable" : state.status,
@@ -26,5 +32,19 @@ export function plateFields(state: PlateTrackState): PlateFields | null {
       state.status === "unavailable" ? 0 : state.supportingFrames,
     plateDetectorConfidence:
       state.status === "unavailable" ? null : state.detectorConfidence,
+    plateCandidateText:
+      state.status === "unavailable" ? null : state.candidateText,
+    plateCandidateConfidence:
+      state.status === "unavailable" ? null : state.candidateConfidence,
+    plateCandidateSupportingFrames:
+      state.status === "unavailable"
+        ? 0
+        : (state.candidateSupportingFrames ?? 0),
+    plateAttemptFrames:
+      state.status === "unavailable" ? 0 : (state.distinctFrames ?? 0),
+    plateLocalizedFrames:
+      state.status === "unavailable" ? 0 : (state.localizedFrames ?? 0),
+    plateReadableFrames:
+      state.status === "unavailable" ? 0 : (state.readableFrames ?? 0),
   };
 }

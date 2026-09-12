@@ -17,7 +17,11 @@ export interface SelectedVehicleProps {
   lost: boolean;
   plate: PlateTrackState | null;
   plateAvailable: boolean;
-  mode: { operating: "handheld" | "mounted"; speedActive: boolean; reason: string };
+  mode: {
+    operating: "handheld" | "mounted";
+    speedActive: boolean;
+    reason: string;
+  };
   policy: CameraPolicy;
   speedUnit: SpeedUnit;
   onAnalyzePlate: () => void;
@@ -59,8 +63,12 @@ const SPEED_REASON: Record<string, string> = {
 const plateLine = (plate: PlateTrackState | null) => {
   if (!plate || plate.status === "idle") return "Not analyzed";
   if (plate.status === "unavailable") return "Plate unavailable";
-  if (plate.status === "pending") return "Analyzing…";
-  if (plate.status === "unreadable") return "Unreadable";
+  if (plate.status === "pending" || plate.status === "unreadable")
+    return plate.candidateText
+      ? `Possible ${plate.candidateText} · unconfirmed (${plate.candidateSupportingFrames ?? 1} frame)`
+      : plate.status === "pending"
+        ? "Analyzing clearer frames…"
+        : "Unreadable";
   return `${plate.plateText} · ${Math.round((plate.plateConfidence ?? 0) * 100)}%`;
 };
 
@@ -162,7 +170,9 @@ export function SelectedVehicle({
               {analyzing ? "Analyzing plate…" : "Analyze plate"}
             </button>
             {!plateAvailable && (
-              <small>Plate reading needs the GPU worker&apos;s plate pipeline.</small>
+              <small>
+                Plate reading needs the GPU worker&apos;s plate pipeline.
+              </small>
             )}
           </div>
         </>

@@ -81,6 +81,11 @@ describe("overlay label", () => {
       "TRAFFIC ALERT · TRUCK · ID 7",
     );
   });
+  it("distinguishes acquisition from the later report alert", () => {
+    expect(overlayLabel("car", 9, null, "mph", null, true, false)).toBe(
+      "ACQUIRING · CAR · ID 9",
+    );
+  });
 });
 
 describe("overlay color", () => {
@@ -90,6 +95,7 @@ describe("overlay color", () => {
     expect(overlayColor("normal", true)).toBe("#8ecbff");
     expect(overlayColor("normal", false, true)).toBe("#ff4d4f");
     expect(overlayColor("candidate", true, true)).toBe("#ff4d4f");
+    expect(overlayColor("normal", false, true, false)).toBe("#ffbf69");
   });
 });
 

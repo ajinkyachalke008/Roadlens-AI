@@ -43,6 +43,9 @@ agents/
 prompts/
 research/
 docs/*
+!docs/evidence/
+docs/evidence/*
+!docs/evidence/showcase-adaptive-benchmark.json
 !docs/STATUS.md
 !docs/FINAL_HANDOFF.md
 !docs/ACCEPTANCE_RESULTS.md

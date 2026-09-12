@@ -1,5 +1,66 @@
 # Plate recognition: architecture, measurements and limits
 
+## Current adaptive acquisition contract
+
+The current release supersedes the report-time-only path described in the
+historical section below. For Showcase, plate acquisition starts as soon as a
+stable vehicle identity is locked and continues across its approach:
+
+```
+completed full-resolution source frames + one locked track identity
+  → sample a real padded vehicle crop no faster than every 320 ms
+  → score source pixels, sharpness, framing, stability and image-scale growth
+  → score at most 16 cadence-spaced frames over 4.8 s
+  → retain/replace and submit only the top eight raw crops (≤ 96 KiB each)
+  → submit one real crop at a time, no faster than every 600 ms
+  → existing worker plate detector and OCR
+  → phone-side consensus keyed by capture epoch + frame + source time
+  → stop and erase raw crops immediately on two-frame confirmation
+  → otherwise settle honestly at the bounded deadline
+```
+
+The traffic image still uses the existing fixed 640/960 analysis transport; a
+1080p-class camera source therefore gives the vehicle/plate crop more sampled
+pixels without increasing every whole-scene detector request. Showcase merely
+requests ideal 1920×1080 at 30 FPS and reports the browser's actual settings.
+Unsupported devices fall back through normal media constraints. No physical
+iPhone resolution or throughput is claimed until it is measured.
+
+| Adaptive bound                                  |             Value |
+| ----------------------------------------------- | ----------------: |
+| Minimum Showcase arming                         | 4.0 s source time |
+| Same-candidate dwell before lock                |            800 ms |
+| Target quality wait                             | 6.5 s source time |
+| Overall search/acquisition wait                 |  25 s source time |
+| Normal/fallback readiness                       |       0.68 / 0.56 |
+| Candidate sample interval                       |            320 ms |
+| OCR submission interval                         |            600 ms |
+| Distinct frames scored / retained and submitted |            16 / 8 |
+| Collection window                               | 4.8 s source time |
+| Hard raw-crop TTL                               |     9 s wall time |
+| Raw crop target/hard size                       |       48 / 96 KiB |
+| Total raw crop memory                           |           768 KiB |
+| Plate work in flight                            |                 1 |
+| Live artifact updates                           |    4 per artifact |
+| Final detail-image memory                       | 16 images / 2 MiB |
+
+The initial annotated report image is immutable evidence. Best Vehicle Capture
+and optional Best Plate Detail have different image IDs and may improve only
+when a materially better real source crop arrives. A possible plate candidate
+is shown only when an actual OCR string clears the conservative candidate
+gates; it is visibly `Unconfirmed` and never populates the confirmed plate
+field. No character substitution, super-resolution or threshold weakening was
+introduced.
+
+Run `npm run showcase:benchmark` for the deterministic readiness trace and
+`npm run plate:ocr-bench`, `npm run plate:eval`, and
+`npm run plate:benchmark` for the current worker measurements. The committed
+readiness result lives at
+[`evidence/showcase-adaptive-benchmark.json`](evidence/showcase-adaptive-benchmark.json).
+
+The earlier four-frame rescue path below is retained as release history. Its
+limits no longer describe the current implementation.
+
 ## Report rescue path
 
 For a report tied to one observed vehicle, the camera now performs a second,
@@ -24,15 +85,15 @@ supporting frames.
 
 ### Rescue bounds and diagnostics
 
-| Bound | Value |
-| --- | ---: |
-| Active report rescues | 2 |
-| Distinct raw crops per report | 4 |
-| Crop long edge | 640 px |
-| Crop target / hard bytes | 48 / 96 KiB |
-| Total rescue cache | 768 KiB |
-| Collection/retention TTL | 3 s |
-| Busy retries per crop | 1 |
+| Bound                         |       Value |
+| ----------------------------- | ----------: |
+| Active report rescues         |           2 |
+| Distinct raw crops per report |           4 |
+| Crop long edge                |      640 px |
+| Crop target / hard bytes      | 48 / 96 KiB |
+| Total rescue cache            |     768 KiB |
+| Collection/retention TTL      |         3 s |
+| Busy retries per crop         |           1 |
 
 Advanced Diagnostics exposes only crop count, byte count, completed/refused
 attempts, and latency. Plate strings are never logged. A final report with a
@@ -102,7 +163,7 @@ argued for replacing it.
 
 Plate difficulty is a small-object problem, and the fix for a small object is to
 look at it closely rather than to enlarge the model that looks at everything.
-Growing to YOLO26m would raise the cost of the model that runs on *every* frame
+Growing to YOLO26m would raise the cost of the model that runs on _every_ frame
 in order to serve work that runs on a handful of frames per incident — and it
 still would not solve the real constraint, which is that the analysis stream is
 downscaled to 640 px across the whole scene. Sending a full-resolution vehicle
@@ -119,15 +180,15 @@ assumption that a bigger detector would have helped here.
 Plate work is the lowest-priority work in the system, enforced independently at
 three layers so no single bug can lift the ceiling.
 
-| Bound | Value | Enforced by |
-| --- | --- | --- |
-| Plate tasks in flight, system wide | 1 | camera, relay and worker |
-| Candidate crops per track | 4 | camera |
-| Tracks under analysis at once | 8 | camera |
-| Minimum interval between requests | 220 ms | camera and relay |
-| Request timeout | 3 s | relay |
-| Crop payload | ≤ 96 KiB, 640 px long edge | protocol schema |
-| Minimum crop | 64 px long edge | protocol schema |
+| Bound                              | Value                      | Enforced by              |
+| ---------------------------------- | -------------------------- | ------------------------ |
+| Plate tasks in flight, system wide | 1                          | camera, relay and worker |
+| Candidate crops per track          | 4                          | camera                   |
+| Tracks under analysis at once      | 8                          | camera                   |
+| Minimum interval between requests  | 220 ms                     | camera and relay         |
+| Request timeout                    | 3 s                        | relay                    |
+| Crop payload                       | ≤ 96 KiB, 640 px long edge | protocol schema          |
+| Minimum crop                       | 64 px long edge            | protocol schema          |
 
 Plate support is negotiated, never assumed. A relay that understands plate
 messages says so in `worker.registered`, and the worker advertises its pipeline
@@ -156,7 +217,7 @@ Ambiguous glyph pairs are **not** substituted. `0/O`, `1/I`, `5/S`, `8/B`,
 `2/Z`, `6/G` and `7/T` are exactly the characters a substitution table would
 "correct", and correcting one on a single reading turns a guess into an
 assertion. Instead, readings that could be the same plate are grouped for
-*voting*, and each character position is then decided by a weighted vote among
+_voting_, and each character position is then decided by a weighted vote among
 the characters actually observed there. Agreement across independent frames is
 evidence; a lookup table is not.
 
@@ -173,12 +234,12 @@ clears 0.55. Otherwise `plateText` is `null` and the UI says "Unreadable".
 
 Worked example, matching the unit tests:
 
-| frame | reading | confidence |
-| --- | --- | --- |
-| 1 | `ABC1234` | 0.95 |
-| 2 | `ABCI234` | 0.66 |
-| 3 | `ABC1234` | 0.93 |
-| 4 | `ABC1234` | 0.89 |
+| frame | reading   | confidence |
+| ----- | --------- | ---------- |
+| 1     | `ABC1234` | 0.95       |
+| 2     | `ABCI234` | 0.66       |
+| 3     | `ABC1234` | 0.93       |
+| 4     | `ABC1234` | 0.89       |
 
 `ABCI234` shares a shape with `ABC1234`, so it joins the vote rather than
 forming a rival answer; position 4 is then decided 3-to-1 in favour of `1`.

@@ -1,0 +1,53 @@
+{
+  "benchmark": "adaptive-showcase-readiness-v1",
+  "generatedAt": "2026-09-12T22:43:18.855Z",
+  "thresholds": {
+    "minimumArmingMs": 4000,
+    "candidates": 3
+  },
+  "readiness": [
+    {
+      "label": "small",
+      "at720p": 0.4896716450271665,
+      "at1080p": 0.519843073598595
+    },
+    {
+      "label": "medium",
+      "at720p": 0.5723715728752539,
+      "at1080p": 0.6276858585895395
+    },
+    {
+      "label": "large_sharp",
+      "at720p": 0.906585786437627,
+      "at1080p": 0.906585786437627
+    }
+  ],
+  "phases": [
+    {
+      "sourceTimeMs": 4000,
+      "phase": "searching",
+      "readiness": 0
+    },
+    {
+      "sourceTimeMs": 4600,
+      "phase": "searching",
+      "readiness": 0
+    },
+    {
+      "sourceTimeMs": 4900,
+      "phase": "acquiring",
+      "readiness": 0.6516858585895395
+    },
+    {
+      "sourceTimeMs": 5500,
+      "phase": "target_ready",
+      "readiness": 0.930585786437627
+    }
+  ],
+  "compute": {
+    "iterations": 100000,
+    "elapsedMs": 17.139999999999986,
+    "microsecondsPerScore": 0.17139999999999986
+  },
+  "scope": "Deterministic synthetic geometry and quality-signal benchmark; not physical plate-read validation."
+}

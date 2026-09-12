@@ -8,7 +8,10 @@ import {
   type ContentRect,
   type OverlayState,
 } from "../camera/overlay";
-import { SHOWCASE_TARGET_COLOR } from "../showcase/constants";
+import {
+  SHOWCASE_ACQUIRING_COLOR,
+  SHOWCASE_TARGET_COLOR,
+} from "../showcase/constants";
 export interface DisplayFrame {
   result: FrameResult;
   image: CanvasImageSource;
@@ -37,8 +40,15 @@ export const overlayColor = (
   ruleState: string,
   selected = false,
   showcase = false,
+  showcaseAlert = true,
 ) =>
-  showcase ? SHOWCASE_TARGET_COLOR : selected ? "#8ecbff" : colorFor(ruleState);
+  showcase
+    ? showcaseAlert
+      ? SHOWCASE_TARGET_COLOR
+      : SHOWCASE_ACQUIRING_COLOR
+    : selected
+      ? "#8ecbff"
+      : colorFor(ruleState);
 
 /**
  * Overlay label.
@@ -55,8 +65,9 @@ export const overlayLabel = (
   speedUnit: SpeedUnit,
   overBy: number | null = null,
   showcase = false,
+  showcaseAlert = true,
 ) =>
-  `${showcase ? "TRAFFIC ALERT · " : ""}${className.toUpperCase()} · ID ${trackId}` +
+  `${showcase ? (showcaseAlert ? "TRAFFIC ALERT · " : "ACQUIRING · ") : ""}${className.toUpperCase()} · ID ${trackId}` +
   (speedMps !== null ? ` · ${displaySpeed(speedMps, speedUnit)}` : "") +
   (speedMps !== null && overBy !== null && overBy > 0
     ? ` · +${displaySpeed(overBy, speedUnit)}`
@@ -78,6 +89,7 @@ function drawBoxes(
   speedUnit: SpeedUnit,
   selectedTrackId: number | null = null,
   showcaseTrackId: number | null = null,
+  showcaseAlert = true,
   plateBox: readonly [number, number, number, number] | null = null,
   overBy: (box: OverlayDrawBox) => number | null = () => null,
 ) {
@@ -93,7 +105,12 @@ function drawBoxes(
     const { x, y, width, height } = toContent(box.bbox, rect);
     const selected = box.trackId === selectedTrackId;
     const showcase = box.trackId === showcaseTrackId;
-    const color = overlayColor(box.ruleState, selected, showcase);
+    const color = overlayColor(
+      box.ruleState,
+      selected,
+      showcase,
+      showcaseAlert,
+    );
     ctx.globalAlpha = box.opacity ?? 1;
     ctx.strokeStyle = color;
     ctx.lineWidth = Math.max(
@@ -109,6 +126,7 @@ function drawBoxes(
       speedUnit,
       overBy(box),
       showcase,
+      showcaseAlert,
     );
     const labelHeight = Math.max(20, rect.width / 40);
     const textWidth = ctx.measureText(label).width + 12;
@@ -166,6 +184,7 @@ export function Stage({
   telemetry,
   selectedTrackId = null,
   showcaseTrackId = null,
+  showcaseAlert = true,
   onSelect,
   plateBox = null,
   speedLimitMps = null,
@@ -181,6 +200,8 @@ export function Stage({
   selectedTrackId?: number | null;
   /** The one real track selected by Showcase; visually distinct from selection. */
   showcaseTrackId?: number | null;
+  /** Red only after the event trigger; acquisition stays neutral amber. */
+  showcaseAlert?: boolean;
   /** Tapping a box selects that vehicle; tapping empty space clears. */
   onSelect?: (trackId: number | null) => void;
   plateBox?: readonly [number, number, number, number] | null;
@@ -195,6 +216,8 @@ export function Stage({
   selection.current = selectedTrackId;
   const showcase = useRef(showcaseTrackId);
   showcase.current = showcaseTrackId;
+  const alert = useRef(showcaseAlert);
+  alert.current = showcaseAlert;
   const plate = useRef(plateBox);
   plate.current = plateBox;
   const limit = useRef(speedLimitMps);
@@ -272,6 +295,7 @@ export function Stage({
         speedUnit,
         selection.current,
         showcase.current,
+        alert.current,
         plate.current,
         (box) =>
           box.speedMps !== null && limit.current !== null
@@ -301,7 +325,16 @@ export function Stage({
     c.width = frame.width;
     c.height = frame.height;
     const ctx = c.getContext("2d")!;
-    ctx.drawImage(frame.image, 0, 0, c.width, c.height);
+    try {
+      ctx.drawImage(frame.image, 0, 0, c.width, c.height);
+    } catch (error) {
+      // A viewer disconnect can retire an ImageBitmap between React committing
+      // this frame and running the passive draw effect. The transition to an
+      // empty stage is already queued; a detached bitmap is not an app error.
+      if (error instanceof DOMException && error.name === "InvalidStateError")
+        return;
+      throw error;
+    }
     drawBoxes(
       ctx,
       { x: 0, y: 0, width: c.width, height: c.height },
@@ -348,7 +381,8 @@ export function Stage({
                     // straight back to normalised source coordinates.
                     const x =
                       (event.clientX - bounds.left - rect.x) / rect.width;
-                    const y = (event.clientY - bounds.top - rect.y) / rect.height;
+                    const y =
+                      (event.clientY - bounds.top - rect.y) / rect.height;
                     onSelect(
                       x < 0 || x > 1 || y < 0 || y > 1
                         ? null

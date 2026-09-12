@@ -1,21 +1,32 @@
 # RoadLens demo runbook
 
-## Plate rescue behavior
+## Adaptive Showcase and plate behavior
 
-When Showcase creates a Traffic alert, leave the report open if the plate first
-shows `Analyzing…`. RoadLens has already copied the exact unannotated vehicle
-pixels from that report frame and may collect up to three additional distinct
-looks during the next three seconds. The vehicle can leave; retained crops may
-still settle the report automatically. A confirmed value states its distinct
-frame support. `Plate located · text unreadable` means the detector found a real
-plate region but OCR could not defend the characters; `Unreadable` remains the
-right result when captured pixels are insufficient.
+Showcase now requests a 1920×1080/30 ideal camera profile and displays the
+actual browser-selected width, height and frame rate. It arms after four seconds
+of analyzed source time, but does not fire on that clock alone. RoadLens finds a
+stable eligible vehicle, marks it amber as **ACQUIRING**, locks that track, and
+waits for better real source pixels while size, sharpness, framing, stability
+and image-scale growth remain useful. The target turns red with **TRAFFIC
+ALERT** only when the event report is created.
 
-The red report evidence and downloaded JPEG do not change when plate metadata
-updates. End Session, page navigation, or a source reset destroys all rescue
-crops. Advanced Diagnostics may show the temporary crop count/bytes but never a
-plate string. Physical validation is still required before calling recovery
-performance verified.
+Plate acquisition begins at lock, before report creation. It can score at most
+16 distinct source looks at a 320 ms cadence over 4.8 seconds, retains/submits
+only the best eight, and submits one crop at a time no faster than every 600 ms.
+Confirmation still requires defensible agreement across distinct frames and
+stops capture early. A strong single real reading may appear as **Possible
+plate · Unconfirmed**; it never becomes the confirmed plate field by itself.
+
+Leave the report open while it says **Analyzing clearer frames…**. The separate
+**Best Vehicle Capture** can improve in place, and **Best Plate Detail** appears
+only after the real detector localizes a plate. The original annotated **Event
+evidence** and downloaded event JPEG never change. `Plate located · text
+unreadable` means localization succeeded but characters could not be defended.
+
+End Session, pagehide, source/runtime reset, timeout or confirmation destroys
+all temporary raw crops. Diagnostics expose counts, dimensions, bytes and
+latency—not plate strings. Physical validation is still required before any
+real-world recovery claim.
 
 ## Showcase presentation flow — September 12, 2026
 
@@ -41,28 +52,36 @@ the camera tab's RAM.
 
 1. Toggle **Showcase** on. Its compact status reads **Arming**.
 2. Start the camera, keep the view steady and point it at actual traffic.
-3. After about five seconds of completed analyzed source time, the status moves
-   to **Waiting** until a real eligible vehicle appears.
+3. At four seconds of completed analyzed source time, the status moves to
+   **Waiting**. It keeps waiting until a real eligible vehicle appears; the
+   four-second gate is minimum arming, not an event timer.
 4. RoadLens chooses one observed, non-ambiguous, confirmed car, motorcycle, bus
-   or truck with sufficient confidence, duration and crop size. A deterministic
-   visual score favors a large, central, clear target; plate text is not an
-   input.
-5. The chosen track locks, turns red with `TRAFFIC ALERT`, opens the existing
-   Selected Vehicle card, and creates exactly one temporary report from that
-   same completed analysis frame. In handheld mode the report speed stays
-   unavailable; red means presentation target, not speeding.
-6. The existing plate pipeline starts for that track alone. Show the real
-   consensus text only if OCR succeeds; otherwise show **Analyzing…**,
-   **Unreadable**, or **Plate unavailable**. The report appears immediately and
-   follows later plate consensus updates.
-7. Open the report. Its full report-time frame now has a baked red box and
+   or truck with sufficient confidence, duration and crop size. Plate text is
+   not an input. The chosen identity turns amber with **ACQUIRING** and remains
+   locked while it approaches.
+5. The controller waits for the real source crop to meet its 0.68 readiness
+   threshold, or uses a bounded quality/trajectory fallback before the 6.5 s
+   target wait expires. It never waits beyond the overall 25 s bound and never
+   switches tracks after a report exists.
+6. At the chosen frame, the target turns red with `TRAFFIC ALERT`, opens the
+   existing Selected Vehicle card, and creates exactly one temporary report.
+   In handheld mode speed remains unavailable; red means presentation target,
+   not speeding.
+7. Plate status and Best Vehicle Capture then continue updating in the open
+   report and paired viewer. Show confirmed text only after distinct-frame
+   consensus; otherwise show **Analyzing clearer frames…**, **Possible plate ·
+   Unconfirmed**, **Plate located · text unreadable**, **Unreadable**, or
+   **Plate unavailable** as actually supported.
+8. Open the report. Its full report-time frame has a baked red box and
    `TRAFFIC ALERT · CLASS · ID` label on the exact reported vehicle. Small
    targets also receive a same-frame corner inset. The paired viewer receives
    that same annotated JPEG through the normal evidence flow, and **Download
    image** saves the same marked bytes.
-8. Point out the professional details: **Trigger**, **Vehicle**, **Measurement
+9. Point out the professional details: **Trigger**, **Vehicle**, **Measurement
    mode**, **Speed status**, **Plate**, detector score, model, calibration and
-   tracker. Limit and margin stay hidden when no limit was configured.
+   tracker. Then show the separate Best Vehicle Capture and optional Best Plate
+   Detail with their real source frame, dimensions and quality. Limit and margin
+   stay hidden when no limit was configured.
 
 Showcase produces one automatic event per enabled run. Toggle it off and on to
 start a fresh run. Toggle off clears the Showcase target without deleting an
@@ -88,6 +107,31 @@ across capture epochs.
 The automated desktop and local-CUDA paths are verified. A physical phone,
 cellular/second-network run and real-road plate/speed behavior remain **NOT YET
 VERIFIED** until the checklist below is executed.
+
+### Physical iPhone acceptance procedure
+
+1. Start the verified local NVIDIA worker and wait for `GPU WORKER READY`.
+2. Open the deployed camera page on an iPhone and enable Showcase.
+3. Record the requested and actual camera width, height and frame rate shown in
+   Diagnostics.
+4. From a legal, stationary and safe position, point the rear camera toward
+   approaching traffic; test several vehicle sizes and distances.
+5. Confirm RoadLens waits for a better target after minimum arming instead of
+   firing only because four or five seconds elapsed.
+6. Confirm the same amber target remains locked as it approaches and that the
+   report is created on a clearer frame.
+7. Leave the report open and observe Best Vehicle Capture and plate status
+   update; verify any confirmed plate manually only where safely and legally
+   visible.
+8. For every attempt, record vehicle-crop dimensions, plate source-pixel
+   dimensions, distinct attempts, localization/readability, final result and
+   whether the visible plate matched.
+9. Check the paired viewer, portrait and landscape layout, evidence/detail
+   aspect ratio, and reachable close/download controls.
+10. End Session and verify reports, evidence/detail images and all temporary
+    plate crops disappear on both devices.
+
+Do not claim physical improvement until this procedure is completed.
 
 ## GPU demonstration — cloud path verified
 
@@ -131,8 +175,8 @@ At the verified frontend URL choose Start camera and grant camera-only permissio
 ## Speed validation demonstration
 
 Only meaningful with a mounted, calibrated camera. Calibrate first and confirm
-the status line reads *measured setup* rather than *weak calibration ·
-re-measure*. Open **Validate speed**, pick a vehicle that currently shows a
+the status line reads _measured setup_ rather than _weak calibration ·
+re-measure_. Open **Validate speed**, pick a vehicle that currently shows a
 valid measured speed, enter the independently measured reference speed and its
 method, and record the trial. The summary shows MAE, median, p95 (suppressed
 below 20 trials), maximum and signed bias; export JSON or CSV before ending the

@@ -1802,17 +1802,17 @@ test("Showcase: accessible mobile toggle drives one real replay event and viewer
     await toggle.click();
     await expect(toggle).toHaveAttribute("data-phase", "arming");
 
-    // The source-time state machine cannot report during its first five
-    // seconds, even though the permitted replay already contains a real bus.
+    // The source-time state machine cannot report during its four-second
+    // minimum arm, even though the permitted replay already contains a real bus.
     const startedAt = Date.now();
     await camera.page.waitForTimeout(2_000);
     await expect(camera.page.locator(".report-row")).toHaveCount(0);
     await expect(toggle).toHaveAttribute("data-phase", "arming");
 
-    await expect(toggle).toHaveAttribute("data-phase", "complete", {
+    await expect(toggle).toHaveAttribute("data-phase", "plate_unreadable", {
       timeout: 35_000,
     });
-    expect(Date.now() - startedAt).toBeGreaterThanOrEqual(4_500);
+    expect(Date.now() - startedAt).toBeGreaterThanOrEqual(3_500);
     await expect(camera.page.locator(".report-row")).toHaveCount(1);
     await expect(viewer.page.locator(".report-row")).toHaveCount(1);
     await expect(camera.page.locator(".report-row strong")).toHaveText(

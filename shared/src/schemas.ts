@@ -191,8 +191,50 @@ export const ReportSchema = z
       .optional(),
     plateText: PlateTextSchema.nullable().optional(),
     plateConfidence: finite.min(0).max(1).nullable().optional(),
-    plateSupportingFrames: seq.max(PLATE_LIMITS.framesPerTrack).optional(),
+    plateSupportingFrames: seq.max(PLATE_LIMITS.adaptiveFrames).optional(),
     plateDetectorConfidence: finite.min(0).max(1).nullable().optional(),
+    /** A strong single-frame OCR observation is review context, not a result. */
+    plateCandidateText: PlateTextSchema.nullable().optional(),
+    plateCandidateConfidence: finite.min(0).max(1).nullable().optional(),
+    plateCandidateSupportingFrames: seq
+      .max(PLATE_LIMITS.adaptiveFrames)
+      .optional(),
+    plateAttemptFrames: seq.max(PLATE_LIMITS.adaptiveFrames).optional(),
+    plateLocalizedFrames: seq.max(PLATE_LIMITS.adaptiveFrames).optional(),
+    plateReadableFrames: seq.max(PLATE_LIMITS.adaptiveFrames).optional(),
+    /**
+     * Improving review artifacts are intentionally distinct from immutable
+     * event evidence. Their pixels still live only in the camera/viewer RAM.
+     */
+    bestCapture: z
+      .object({
+        imageId: id,
+        state: z.enum(["available", "evicted"]),
+        frameId: short,
+        sourceTimeMs: nonnegative,
+        width: seq.min(1).max(8192),
+        height: seq.min(1).max(8192),
+        quality: finite.min(0).max(1),
+        sharpness: nonnegative,
+      })
+      .strict()
+      .optional(),
+    bestPlateDetail: z
+      .object({
+        imageId: id,
+        state: z.enum(["available", "evicted"]),
+        frameId: short,
+        sourceTimeMs: nonnegative,
+        width: seq.min(1).max(8192),
+        height: seq.min(1).max(8192),
+        quality: finite.min(0).max(1),
+        sharpness: nonnegative,
+      })
+      .strict()
+      .optional(),
+    /** Later qualifying frame when an immutable Showcase event is promoted. */
+    measurementFrameId: short.optional(),
+    measurementSourceTimeMs: nonnegative.optional(),
     evidenceId: id.nullable(),
     evidenceState: z.enum(["none", "available", "evicted"]),
     review: z.enum(["pending", "noted", "dismissed"]),
@@ -217,8 +259,29 @@ export const ReportSchema = z
           (r.plateSupportingFrames ?? 0) >= PLATE_LIMITS.minSupportingFrames
         : r.plateText === null || r.plateText === undefined,
   )
+  .refine((r) => r.plateStatus !== undefined || r.plateText === undefined)
   .refine(
-    (r) => r.plateStatus !== undefined || r.plateText === undefined,
+    (r) =>
+      r.plateStatus !== "read" ||
+      r.plateCandidateText === null ||
+      r.plateCandidateText === undefined,
+  )
+  .refine((r) =>
+    typeof r.plateCandidateText === "string"
+      ? typeof r.plateCandidateConfidence === "number" &&
+        (r.plateCandidateSupportingFrames ?? 0) >= 1
+      : r.plateCandidateConfidence === null ||
+        r.plateCandidateConfidence === undefined,
+  )
+  .refine(
+    (r) =>
+      (r.measurementFrameId === undefined) ===
+      (r.measurementSourceTimeMs === undefined),
+  )
+  .refine(
+    (r) =>
+      r.measurementFrameId === undefined ||
+      r.measurementFrameId.startsWith(r.captureEpoch + ":"),
   )
   .refine(
     (r) =>

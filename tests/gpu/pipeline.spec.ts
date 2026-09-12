@@ -253,7 +253,7 @@ test("real GPU camera → relay → CUDA → synchronized reports/viewer; fallba
   ).toBe(true);
   await expect(showcase).toHaveAttribute(
     "data-phase",
-    /plate_pending|complete/,
+    /plate_collecting|plate_confirmed|plate_unreadable/,
     { timeout: 20_000 },
   );
   await expect(page.locator(".report-row")).toHaveCount(1);
@@ -261,7 +261,9 @@ test("real GPU camera → relay → CUDA → synchronized reports/viewer; fallba
   await expect(page.getByTestId("selected-plate")).not.toHaveText(
     "Not analyzed",
   );
-  expect(plateRequests).toBeGreaterThan(0);
+  await expect
+    .poll(() => plateRequests, { timeout: 10_000 })
+    .toBeGreaterThan(0);
   await showcase.click();
   await expect(showcase).toHaveAttribute("data-phase", "off");
   const code = (await page.getByTestId("pairing-code").innerText()).trim();
@@ -287,6 +289,9 @@ test("real GPU camera → relay → CUDA → synchronized reports/viewer; fallba
     "data-evidence-annotation",
     "showcase",
   );
+  await expect(view.getByTestId("report-best-capture")).toBeVisible({
+    timeout: 15_000,
+  });
   await expect(
     view.getByRole("button", { name: "Mark noted", exact: true }).first(),
   ).toBeVisible();

@@ -5,7 +5,7 @@ import {
   STALLED_STATUS,
   type CompletedFrame,
 } from "../camera/capture";
-import { SessionStore } from "../session/store";
+import { SessionStore, type PlateFields } from "../session/store";
 import {
   RelayClient,
   api,
@@ -41,9 +41,13 @@ import { plateFields } from "../plates/report";
 import { SelectedVehicle } from "../components/SelectedVehicle";
 import { legacyFrame } from "../transport/legacyFrame";
 import { annotatedEvidence } from "../session/evidence";
+import { reportForProtocol } from "../session/reportProtocol";
+import { cropQuality, cropSharpness } from "../plates/quality";
 import {
   ShowcaseController,
+  showcaseLongEdge,
   showcaseStatusLabel,
+  type ShowcaseQuality,
   type ShowcaseState,
 } from "../showcase/controller";
 export default function Camera() {
@@ -85,6 +89,12 @@ export default function Camera() {
   );
   /** Reports whose plate consensus is still being followed, by track. */
   const plateReports = useRef(new Map<number, string>()).current;
+  const showcaseQualities = useRef(
+    new Map<
+      number,
+      ShowcaseQuality & { sampledAtMs: number; captureEpoch: string }
+    >(),
+  ).current;
   const [validationRevision, setValidationRevision] = useState(0);
   const estimates = useRef(new Map<number, SpeedEstimate>());
   const [evidence, setEvidence] = useState(false);
@@ -188,7 +198,12 @@ export default function Camera() {
       if (!parsed.success) return;
       const request = parsed.data;
       if (request.type === "state.request") {
-        const reports = store.snapshot();
+        const client = relay.current;
+        const reports = store
+          .snapshot()
+          .map((report) =>
+            reportForProtocol(report, client?.reportProtocol ?? 1),
+          );
         if (!reports.length)
           relay.current?.send({
             v: 2,
@@ -261,8 +276,14 @@ export default function Camera() {
     const c = new CameraCapture(video.current!);
     capture.current = c;
     store.onChange = () => setRevision((v) => v + 1);
-    store.onReport = (report) =>
-      relay.current?.send({ v: 2, type: "report.upsert", report });
+    store.onReport = (report) => {
+      const client = relay.current;
+      client?.send({
+        v: 2,
+        type: "report.upsert",
+        report: reportForProtocol(report, client.reportProtocol),
+      });
+    };
     c.onError = setError;
     c.onInferenceMode = setInferenceMode;
     c.onProfile = (next, automatic) => {
@@ -282,11 +303,16 @@ export default function Camera() {
       syncShowcasePlate();
       setPlateRevision((value) => value + 1);
     };
+    plates.onArtifact = (trackId, kind, artifact) => {
+      const reportId = plateReports.get(trackId);
+      if (reportId) store.applyArtifact(reportId, kind, artifact);
+    };
     c.onReset = () => {
       setFrame(null);
       settleInterruptedShowcasePlate();
       plates.reset();
       plateReports.clear();
+      showcaseQualities.clear();
       setShowcaseState(showcase.resetContinuity());
       // Track identities do not survive an epoch, so a selection made in the
       // previous one cannot mean anything in this one.
@@ -334,9 +360,9 @@ export default function Camera() {
             ? "Camera moved · recalibrate"
             : "Handheld / uncalibrated · detection only",
       );
+      handleShowcaseFrame(completed);
       plates.observe(completed.result, completed.canvas, c.remote);
       flushPlates();
-      handleShowcaseFrame(completed);
       for (const candidate of completed.candidates) {
         const activeShowcase = showcase.snapshot();
         const showcaseReportId =
@@ -357,12 +383,6 @@ export default function Camera() {
           showcaseReportId === id &&
           store.reports.get(id)?.kind === "observation"
         ) {
-          const evidenceImage = annotatedEvidence(
-            completed.canvas,
-            completed.result,
-            candidate.trackId,
-            "speed_candidate",
-          );
           store.upgradeToSpeedCandidate(
             id,
             completed.result,
@@ -376,7 +396,7 @@ export default function Camera() {
               residualM: candidate.estimate.residualM,
               coverageMs: candidate.estimate.coverageMs,
             },
-            evidenceImage ?? undefined,
+            undefined,
             plate,
           );
           continue;
@@ -475,6 +495,7 @@ export default function Camera() {
       store.clear();
       plates.reset();
       plateReports.clear();
+      showcaseQualities.clear();
       setShowcaseState(showcase.setEnabled(false));
       setFrame(null);
       setRoom(null);
@@ -536,6 +557,7 @@ export default function Camera() {
       store.clear();
       plates.reset();
       plateReports.clear();
+      showcaseQualities.clear();
     };
   }, [store]);
   useEffect(() => {
@@ -554,12 +576,13 @@ export default function Camera() {
     const report = store.reports.get(current.reportId);
     if (report?.plateStatus !== "pending") return;
     store.applyPlate(current.reportId, {
+      ...(plateFields(plates.state(current.targetTrackId ?? -1)) ?? {}),
       plateStatus: "unreadable",
       plateText: null,
       plateConfidence: null,
       plateSupportingFrames: report.plateSupportingFrames ?? 0,
       plateDetectorConfidence: report.plateDetectorConfidence ?? null,
-    });
+    } as PlateFields);
   }
   function syncShowcasePlate() {
     const current = showcase.snapshot();
@@ -570,13 +593,97 @@ export default function Camera() {
   }
   function handleShowcaseFrame(completed: CompletedFrame) {
     if (!showcase.acceptsFrames) return;
-    const beforePhase = showcase.phase;
+    const before = showcase.snapshot();
+    const observedIds = new Set(
+      completed.result.tracks
+        .filter((track) => track.observed)
+        .map((track) => track.trackId),
+    );
+    for (const [trackId, quality] of showcaseQualities)
+      if (
+        quality.captureEpoch !== completed.result.captureEpoch ||
+        !observedIds.has(trackId)
+      )
+        showcaseQualities.delete(trackId);
+    const ranked = completed.result.tracks
+      .filter(
+        (track) =>
+          track.observed &&
+          ["car", "motorcycle", "bus", "truck"].includes(track.className),
+      )
+      .sort(
+        (a, b) =>
+          showcaseLongEdge(b, completed.result) -
+          showcaseLongEdge(a, completed.result),
+      )
+      .slice(0, 3);
+    for (const track of ranked) {
+      const previous = showcaseQualities.get(track.trackId);
+      if (
+        previous &&
+        completed.result.sourceTimeMs - previous.sampledAtMs < 250
+      )
+        continue;
+      const sharpness = cropSharpness(completed.canvas, track.bbox);
+      showcaseQualities.set(track.trackId, {
+        sharpness,
+        quality: cropQuality({
+          bbox: track.bbox,
+          sourceWidth: completed.result.frameWidth,
+          sourceHeight: completed.result.frameHeight,
+          detectionScore: track.score,
+          sharpness,
+        }),
+        sampledAtMs: completed.result.sourceTimeMs,
+        captureEpoch: completed.result.captureEpoch,
+      });
+    }
+    const plateReady = new Set<number>();
+    for (const track of completed.result.tracks) {
+      const plate = plates.state(track.trackId);
+      if (
+        (plate.localizedFrames ?? 0) > 0 &&
+        (plate.bestPlateWidthPx ?? 0) >= 48 &&
+        (plate.bestPlateHeightPx ?? 0) >= 14 &&
+        (plate.detectorConfidence ?? 0) >= 0.5
+      )
+        plateReady.add(track.trackId);
+    }
     const target = showcase.onFrame(
       completed.result,
       completed.ambiguousTrackIds,
+      showcaseQualities,
+      plateReady,
     );
+    const after = showcase.snapshot();
+    if (
+      before.targetTrackId !== null &&
+      before.reportId === null &&
+      before.targetTrackId !== after.targetTrackId
+    )
+      plates.cancel(before.targetTrackId);
+    if (
+      after.targetTrackId !== null &&
+      before.targetTrackId !== after.targetTrackId
+    ) {
+      setSelectedTrackId(after.targetTrackId);
+      if (capture.current)
+        capture.current.selectedTrackId = after.targetTrackId;
+      if (
+        plates.request(
+          after.targetTrackId,
+          !!capture.current?.remote?.plateAvailable,
+        )
+      )
+        plates.beginAdaptiveCapture(
+          completed.result,
+          completed.canvas,
+          capture.current?.remote,
+          after.targetTrackId,
+        );
+    }
     if (!target) {
-      if (beforePhase !== showcase.phase) setShowcaseState(showcase.snapshot());
+      setShowcaseState(after);
       return;
     }
     setSelectedTrackId(target.trackId);
@@ -587,7 +694,7 @@ export default function Camera() {
         !!capture.current?.remote?.plateAvailable,
       );
       if (plateAccepted)
-        plates.beginReportRescue(
+        plates.beginAdaptiveCapture(
           completed.result,
           completed.canvas,
           capture.current?.remote,
@@ -637,6 +744,11 @@ export default function Camera() {
         plate,
         speedCandidate ? undefined : "showcase",
       );
+      const artifacts = plates.artifactsFor(target.trackId);
+      if (artifacts.vehicle)
+        store.applyArtifact(report.reportId, "vehicle", artifacts.vehicle);
+      if (artifacts.plate)
+        store.applyArtifact(report.reportId, "plate", artifacts.plate);
       setShowcaseState(
         showcase.markReportCreated(
           report.reportId,
@@ -688,7 +800,12 @@ export default function Camera() {
       remote?.close();
       return;
     }
-    await capture.current?.start(profile, file, remote);
+    await capture.current?.start(
+      profile,
+      file,
+      remote,
+      showcase.snapshot().enabled ? "showcase" : "standard",
+    );
   }
   async function prepareGpu(current: () => boolean) {
     if (!sharingAvailable()) return;
@@ -878,6 +995,7 @@ export default function Camera() {
   void plateRevision;
   const selectedPlate =
     selectedTrackId === null ? null : plates.state(selectedTrackId);
+  const cameraSource = capture.current?.cameraSource ?? null;
   const select = (trackId: number | null) => {
     setSelectedTrackId(trackId);
     if (capture.current) capture.current.selectedTrackId = trackId;
@@ -924,7 +1042,22 @@ export default function Camera() {
               const enabling = !showcaseState.enabled;
               const target = showcaseState.targetTrackId;
               setShowcaseState(showcase.setEnabled(enabling));
+              showcaseQualities.clear();
+              if (
+                !enabling &&
+                target !== null &&
+                showcaseState.reportId === null
+              )
+                plates.cancel(target);
               if (!enabling && target === selectedTrackId) select(null);
+              if (capture.current?.sourceMode === "live_camera" && running)
+                void capture.current
+                  .applySourceProfile(enabling ? "showcase" : "standard")
+                  .then(({ fallback, status: source }) =>
+                    setCameraNote(
+                      `${source.note}${fallback ? " · Showcase preference unsupported; using camera fallback" : ""}`,
+                    ),
+                  );
             }}
           >
             <i aria-hidden="true" />
@@ -943,6 +1076,10 @@ export default function Camera() {
         telemetry={overlay}
         selectedTrackId={selectedTrackId}
         showcaseTrackId={showcaseState.targetTrackId}
+        showcaseAlert={
+          showcaseState.phase === "target_ready" ||
+          showcaseState.reportId !== null
+        }
         onSelect={select}
         plateBox={selectedPlate?.plateBox ?? null}
         speedLimitMps={capture.current?.policy.speedLimitMps ?? null}
@@ -1279,6 +1416,39 @@ export default function Camera() {
             Browser fallback stays available.
           </p>
           <hr />
+          <h3>Camera source</h3>
+          <dl
+            className="gpu-diagnostics"
+            data-testid="camera-source-diagnostics"
+          >
+            <dt>Profile</dt>
+            <dd>{cameraSource?.profile ?? "standard"}</dd>
+            <dt>Requested</dt>
+            <dd>
+              {cameraSource
+                ? `${cameraSource.requestedWidth} × ${cameraSource.requestedHeight}`
+                : "Camera not started"}
+            </dd>
+            <dt>Actual</dt>
+            <dd data-testid="camera-source-actual">
+              {cameraSource?.actualWidth && cameraSource.actualHeight
+                ? `${cameraSource.actualWidth} × ${cameraSource.actualHeight}${cameraSource.actualFrameRate ? ` · ${cameraSource.actualFrameRate.toFixed(0)} FPS` : ""}`
+                : "Unavailable"}
+            </dd>
+            <dt>Focus</dt>
+            <dd>
+              {cameraSource?.focusMode ??
+                (cameraSource?.continuousFocusAvailable === false
+                  ? "Continuous focus unavailable"
+                  : "Browser managed")}
+            </dd>
+          </dl>
+          <p className="footnote">
+            Showcase prefers a 1080p-class source. The browser may choose a
+            supported fallback; analysis transport remains independently
+            bounded.
+          </p>
+          <hr />
           <h3>Plate recognition</h3>
           <label>
             When to read plates
@@ -1315,7 +1485,7 @@ export default function Camera() {
               {plates.diagnostics.refused} refused ·{" "}
               {plates.diagnostics.medianMs.toFixed(0)} ms median
             </dd>
-            <dt>Report rescue</dt>
+            <dt>Adaptive capture</dt>
             <dd>
               {plates.diagnostics.rescueCrops} temporary crops ·{" "}
               {(plates.diagnostics.rescueBytes / 1024).toFixed(0)} KiB RAM
@@ -1331,7 +1501,7 @@ export default function Camera() {
             <dd>
               {plates.diagnostics.lastCrop.plateWidth &&
               plates.diagnostics.lastCrop.plateHeight
-                ? `${plates.diagnostics.lastCrop.plateWidth} × ${plates.diagnostics.lastCrop.plateHeight} px`
+                ? `${plates.diagnostics.lastCrop.plateWidth} × ${plates.diagnostics.lastCrop.plateHeight} source px`
                 : "Not located"}
             </dd>
           </dl>

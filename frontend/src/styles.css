@@ -738,6 +738,20 @@ input[type="checkbox"] {
 .evidence-caption strong {
   color: var(--ink);
 }
+.report-artifact {
+  margin-top: 24px;
+  padding-top: 18px;
+  border-top: 1px solid var(--border);
+}
+.report-artifact h3,
+.drawer > h3 {
+  margin: 0 0 12px;
+  font-size: 14px;
+}
+.plate-detail {
+  width: auto;
+  max-width: 100%;
+}
 .calibration-frame {
   cursor: crosshair;
 }
@@ -941,6 +955,11 @@ hr {
   }
   .drawer-head h2 {
     font-size: 21px;
+  }
+  .evidence-caption {
+    align-items: flex-start;
+    flex-direction: column;
+    gap: 3px;
   }
   .connect-panel {
     padding: 23px;

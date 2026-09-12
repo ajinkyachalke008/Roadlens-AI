@@ -39,6 +39,12 @@ still **NOT VERIFIED**. No backend, Render relay, shared protocol or worker
 runtime source changed in this release; the frontend production deployment is
 the affected service.
 
+Application commit `0b7d0a022e2fb9e70b7ab7198bf567c616824c5e` is on public
+`main`. Vercel deployment `3PmeyLWHV8ucjZmiG2VagtJ76XsR` completed successfully,
+and the public URL passed the Showcase paired-browser acceptance 1/1 against the
+unchanged deployed Render relay. That is deployed desktop-browser evidence, not
+the outstanding physical-phone acceptance.
+
 The current application adds an optional Windows NVIDIA detector to the existing browser detector. GPU mode requires that computer to be running and connected outbound to the relay. Browser mode retains camera-side inference and does not require a desktop worker. Tracking, calibration, rules and temporary reports remain authoritative in the camera browser in both modes.
 
 The new request supersedes the earlier local-worker prohibition. It does not authorize cloud GPU inference, an inbound worker server, tunnels, accounts, a database or persistent media storage.

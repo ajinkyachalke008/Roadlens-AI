@@ -64,9 +64,19 @@ median inference and 14.75/14.86/16.95 ms total; ONNX CUDA measured
 5.96/9.29/17.07 ms inference and 12.97/15.96/23.89 ms total. All profiles found
 the same five real detections on the permitted fixture.
 
+Application commit `0b7d0a022e2fb9e70b7ab7198bf567c616824c5e` is pushed to
+`origin/main`. GitHub reports Vercel deployment `3PmeyLWHV8ucjZmiG2VagtJ76XsR`
+successful at 2026-09-12T19:14:23Z, and the public
+<https://roadlens-ai-five.vercel.app> then passed the real Showcase camera/viewer
+acceptance 1/1 against the deployed Render relay. That production run covered
+the five-second source-time gate, one actual browser detection/track, report and
+evidence synchronization, honest unavailable plate state, red overlay,
+performance telemetry, End/pagehide/reload cleanup and no page errors. Render
+and worker application code are unchanged and need no deployment for this
+release.
+
 Physical phone, live-road plate legibility and field speed accuracy remain
-**NOT VERIFIED**. The normal production push and Vercel verification follow the
-local release gates; Render and worker application code are unchanged.
+**NOT VERIFIED**.
 
 ## Vehicle intelligence and tracking pass — September 11, 2026
 

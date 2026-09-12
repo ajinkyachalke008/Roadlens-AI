@@ -43,6 +43,46 @@ Suites on the shipped build: 243 unit, 85 contract, 42 tracking, 13 E2E
 (including 10 privacy), 95 worker tests with 139 subtests. Physical validation
 is **NOT VERIFIED** and the procedure is `docs/PHYSICAL_VALIDATION.md`.
 
+### Production verification, September 11, 2026
+
+Verified against the deployed Vercel frontend, the deployed Render relay and the
+local RTX 5070 Ti worker connected outbound:
+
+- worker registered and advertising the plate pipeline: relay reports
+  `gpu: {enabled: true, state: "ready"}`, model `yolo26s-640-pytorch_cuda-v1`,
+  OCR `fast-plate-ocr`, plate read latency 202 ms median;
+- paired camera/viewer cloud smoke passes end to end, including reports, the
+  state snapshot and cleanup;
+- tap-to-select on the live build: `BUS · ID 1`, detection 95%, tracking state
+  confirmed, motion reported, speed withheld as `Mount and calibrate for speed`;
+- **one identity held for 36.6 s of continuous observation with no ID change**,
+  which is the claim this release exists to make.
+
+Two defects were found this way and fixed, neither of which the offline suites
+had caught:
+
+1. The frame-protocol negotiation stripped the new frame-level fields but not
+   the new per-track ones. `TrackSchema` is strict too, so a relay deployed
+   before this release refused any frame carrying a track — and refusing a
+   header disconnects the camera rather than dropping a frame. The viewer sat on
+   "Source offline" while the camera analysed normally.
+2. Plate analysis could stall on "Analyzing…" permanently. Candidates were
+   ranked by quality and truncated, while only a current-frame candidate can be
+   cropped from the canvas in hand; on a steady scene the current look was
+   evicted every time. A deadline now backs up the fix so no request can hang.
+
+**Render still needs a manual deploy** (`autoDeployTrigger: off`) for the
+`frameProtocol` advertisement in `backend/src/relay.ts`. Until then the camera
+negotiates down and viewers simply do not receive mode, selection or motion;
+nothing else is affected and nothing measured changes.
+
+
+After the fix, the same live path settles correctly: `Analyzing…` for about
+twelve seconds, then `Unreadable`, with two reads completed at 174 ms median —
+the right answer for a photograph carrying no legible plate. A plate that two
+frames agree on still reports as read regardless of the deadline, so the
+deadline can only convert an absent answer, never a real one.
+
 ## Final intelligence pass — September 11, 2026
 
 Baseline reproduced on clean main `b75faec` before any edit: typecheck, lint,

@@ -382,6 +382,12 @@ export default function Camera() {
           continue;
         }
         if (store.reports.has(id)) continue;
+        plates.beginReportRescue(
+          completed.result,
+          completed.canvas,
+          c.remote,
+          candidate.trackId,
+        );
         store.save(
           completed.result,
           completed.policy,
@@ -580,6 +586,13 @@ export default function Camera() {
         target.trackId,
         !!capture.current?.remote?.plateAvailable,
       );
+      if (plateAccepted)
+        plates.beginReportRescue(
+          completed.result,
+          completed.canvas,
+          capture.current?.remote,
+          target.trackId,
+        );
       const plate = plateAccepted
         ? (plateFields(plates.state(target.trackId)) ?? undefined)
         : {
@@ -1281,7 +1294,12 @@ export default function Camera() {
               <option value="all">Every tracked vehicle (testing)</option>
             </select>
           </label>
-          <dl className="gpu-diagnostics" data-testid="plate-diagnostics">
+          <dl
+            className="gpu-diagnostics"
+            data-testid="plate-diagnostics"
+            data-rescue-crops={plates.diagnostics.rescueCrops}
+            data-rescue-bytes={plates.diagnostics.rescueBytes}
+          >
             <dt>Availability</dt>
             <dd>
               {capture.current?.remote
@@ -1296,6 +1314,25 @@ export default function Camera() {
               {plates.diagnostics.completed} completed ·{" "}
               {plates.diagnostics.refused} refused ·{" "}
               {plates.diagnostics.medianMs.toFixed(0)} ms median
+            </dd>
+            <dt>Report rescue</dt>
+            <dd>
+              {plates.diagnostics.rescueCrops} temporary crops ·{" "}
+              {(plates.diagnostics.rescueBytes / 1024).toFixed(0)} KiB RAM
+            </dd>
+            <dt>Last vehicle crop</dt>
+            <dd>
+              {plates.diagnostics.lastCrop.vehicleWidth ||
+              plates.diagnostics.lastCrop.vehicleHeight
+                ? `${plates.diagnostics.lastCrop.vehicleWidth} × ${plates.diagnostics.lastCrop.vehicleHeight} px · quality ${plates.diagnostics.lastCrop.quality.toFixed(2)} · sharpness ${plates.diagnostics.lastCrop.sharpness.toFixed(1)}`
+                : "No crop measured"}
+            </dd>
+            <dt>Last plate region</dt>
+            <dd>
+              {plates.diagnostics.lastCrop.plateWidth &&
+              plates.diagnostics.lastCrop.plateHeight
+                ? `${plates.diagnostics.lastCrop.plateWidth} × ${plates.diagnostics.lastCrop.plateHeight} px`
+                : "Not located"}
             </dd>
           </dl>
           <p className="footnote">

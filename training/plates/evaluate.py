@@ -36,6 +36,7 @@ from worker.vision.plates import (  # noqa: E402
     PlateReader,
     load_ocr,
     normalize_text,
+    plausibility,
     preprocess_crop,
 )
 from training.plates.ocr_bench import character_accuracy  # noqa: E402
@@ -86,7 +87,8 @@ def load_truth(directory, region=None):
     return images, truth
 
 
-def evaluate_scene(reader, images, truth, confidence, suite):
+def evaluate_scene(reader, images, truth, confidence, suite, max_candidates=1,
+                   crop_edge=0, jpeg_quality=90):
     """Run the shipped pipeline over whole photographs, exactly as the worker does."""
     import cv2
     matched = 0
@@ -109,6 +111,16 @@ def evaluate_scene(reader, images, truth, confidence, suite):
         if bgr is None:
             continue
         rgb = bgr[:, :, ::-1].copy()
+        original_height, original_width = rgb.shape[:2]
+        if crop_edge and max(original_width, original_height) > crop_edge:
+            scale = crop_edge / max(original_width, original_height)
+            rgb = cv2.resize(rgb, (max(1, round(original_width * scale)),
+                                   max(1, round(original_height * scale))),
+                             interpolation=cv2.INTER_AREA)
+            ok, encoded = cv2.imencode('.jpg', rgb[:, :, ::-1],
+                                       [cv2.IMWRITE_JPEG_QUALITY, jpeg_quality])
+            if ok:
+                rgb = cv2.imdecode(encoded, cv2.IMREAD_COLOR)[:, :, ::-1].copy()
         height, width = rgb.shape[:2]
         started = perf_counter()
         boxes = reader.detector.detect(rgb, confidence=confidence)
@@ -116,7 +128,10 @@ def evaluate_scene(reader, images, truth, confidence, suite):
         expected += len(entries)
         predicted += len(boxes)
         pixel_boxes = [
-            [entry['box'][0], entry['box'][1], entry['box'][2], entry['box'][3]]
+            [entry['box'][0] * width / original_width,
+             entry['box'][1] * height / original_height,
+             entry['box'][2] * width / original_width,
+             entry['box'][3] * height / original_height]
             for entry in entries
             if entry['box'] is not None
         ]
@@ -143,12 +158,17 @@ def evaluate_scene(reader, images, truth, confidence, suite):
         # pipeline picks its own best box, exactly as the worker does. Detecting
         # a second time here would both waste GPU and inflate the latency this
         # function reports.
-        guess = None
-        if boxes:
-            plate = reader.crop(rgb, boxes[0]['box'])
-            if plate.size:
-                guess, _confidence = reader.ocr.read(
-                    preprocess_crop(plate, reader.preprocessing))
+        choices = []
+        for detection in boxes[:max_candidates]:
+            plate = reader.crop(rgb, detection['box'])
+            if not plate.size:
+                continue
+            guess, ocr_confidence = reader.ocr.read(
+                preprocess_crop(plate, reader.preprocessing))
+            credibility = ((ocr_confidence or 0.0) * plausibility(guess)
+                           * (0.65 + 0.35 * detection['score']))
+            choices.append((credibility, guess))
+        guess = max(choices, default=(0.0, None), key=lambda choice: choice[0])[1]
         latencies.append((perf_counter() - started) * 1000)
         target_text = next((entry['text'] for entry in entries if entry['text']), None)
         if target_text is None:
@@ -253,10 +273,16 @@ def main():
     parser.add_argument('--confidence', type=float, default=0.25)
     parser.add_argument('--device', type=int, default=0)
     parser.add_argument('--imgsz', type=int, default=640)
+    parser.add_argument('--max-candidates', type=int, choices=[1, 2, 3], default=1)
+    parser.add_argument('--crop-edge', type=int, choices=[0, 640, 768, 960], default=0)
+    parser.add_argument('--jpeg-quality', type=int, choices=range(50, 96), default=90)
     parser.add_argument('--cpu', action='store_true')
     parser.add_argument('--output', type=Path)
     args = parser.parse_args()
     detector = PlateDetector(device=args.device)
+    # Evaluation override only; the worker continues to use its catalogued 640
+    # input unless a measured release deliberately changes that artifact.
+    detector.input_size = args.imgsz
     reader = PlateReader(detector, load_ocr(args.ocr, device=args.device, use_cuda=not args.cpu),
                          preprocessing=args.preprocess)
     report = {
@@ -271,8 +297,12 @@ def main():
         }[args.suite],
         'detectorModel': detector.model_id,
         'detectorSha256': detector.model_sha256,
+        'detectorInputSize': detector.input_size,
         'ocrEngine': reader.ocr.name,
         'preprocessing': args.preprocess,
+        'maxCandidates': args.max_candidates,
+        'transportCropEdge': args.crop_edge or None,
+        'jpegQuality': args.jpeg_quality if args.crop_edge else None,
     }
     try:
         if args.suite == 'openimages':
@@ -286,7 +316,8 @@ def main():
             region = None if args.suite == 'user' else args.suite
             directory = args.data / ('user_eval' if args.suite == 'user' else 'openalpr')
             images, truth = load_truth(directory, region)
-            report.update(evaluate_scene(reader, images, truth, args.confidence, args.suite))
+            report.update(evaluate_scene(reader, images, truth, args.confidence, args.suite,
+                                         args.max_candidates, args.crop_edge, args.jpeg_quality))
             if args.compare_preprocessing:
                 report['preprocessingComparison'] = evaluate_preprocessing(
                     reader, images, truth, list(PREPROCESSORS))

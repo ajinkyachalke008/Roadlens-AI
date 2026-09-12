@@ -22,6 +22,8 @@ export interface PlateObservation {
   detectorConfidence: number | null;
   /** Crop quality in (0,1]; how much this look is worth relative to others. */
   quality: number;
+  /** Independent captured source frame. Variants/retries share this key. */
+  sourceFrame?: string;
 }
 export interface PlateConsensus {
   plateText: string | null;
@@ -46,6 +48,16 @@ export const shapeKey = (text: string) =>
 export function plateConsensus(
   observations: readonly PlateObservation[],
 ): PlateConsensus {
+  const distinct = new Map<string, PlateObservation>();
+  observations.forEach((observation, index) => {
+    const key = observation.sourceFrame ?? `legacy:${index}`;
+    const prior = distinct.get(key);
+    const weight = (value: PlateObservation) =>
+      Math.max(0, value.confidence ?? 0) * Math.max(0.05, value.quality);
+    if (!prior || weight(observation) > weight(prior))
+      distinct.set(key, observation);
+  });
+  observations = [...distinct.values()];
   const readings = observations.filter(
     (observation): observation is PlateObservation & { text: string } =>
       typeof observation.text === "string" && observation.text.length > 0,
@@ -80,10 +92,7 @@ export function plateConsensus(
     weight: number;
   } | null = null;
   for (const members of groups.values()) {
-    const weight = members.reduce(
-      (sum, member) => sum + weightOf(member),
-      0,
-    );
+    const weight = members.reduce((sum, member) => sum + weightOf(member), 0);
     if (!best || weight > best.weight) best = { members, weight };
   }
   if (!best) return empty;
@@ -104,7 +113,10 @@ export function plateConsensus(
     let castTotal = 0;
     for (const [character, value] of votes) {
       castTotal += value;
-      if (value > winnerWeight || (value === winnerWeight && character < winner)) {
+      if (
+        value > winnerWeight ||
+        (value === winnerWeight && character < winner)
+      ) {
         winner = character;
         winnerWeight = value;
       }

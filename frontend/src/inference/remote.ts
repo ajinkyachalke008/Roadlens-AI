@@ -42,13 +42,81 @@ export interface GpuDiagnostics {
 export class GpuUnavailableError extends Error {}
 /** Plate recognition is absent or refused this request; traffic is unaffected. */
 export class PlateUnavailableError extends Error {}
-export type PlateRequest = Omit<
-  PlateIdentity,
-  "roomId" | "requestId"
-> & {
+export type PlateRequest = Omit<PlateIdentity, "roomId" | "requestId"> & {
   /** Vehicle box in the source frame, normalised, already padded. */
   crop: { x: number; y: number; width: number; height: number };
 };
+export interface PlateCropSnapshot {
+  blob: Blob;
+  sourceWidth: number;
+  sourceHeight: number;
+  encodedWidth: number;
+  encodedHeight: number;
+  crop: PlateRequest["crop"];
+}
+
+/**
+ * Copy original source pixels into a bounded JPEG before the source canvas can
+ * advance. `drawImage` is synchronous; only JPEG encoding is deferred.
+ */
+export async function capturePlateCrop(
+  canvas: HTMLCanvasElement,
+  crop: PlateRequest["crop"],
+  qualitySteps: readonly number[] = [0.9, 0.85, 0.75, 0.65],
+): Promise<PlateCropSnapshot> {
+  const sourceWidth = canvas.width;
+  const sourceHeight = canvas.height;
+  const pixelWidth = Math.round(crop.width * sourceWidth);
+  const pixelHeight = Math.round(crop.height * sourceHeight);
+  if (
+    Math.max(pixelWidth, pixelHeight) < PLATE_LIMITS.minCropEdge ||
+    pixelWidth < 1 ||
+    pixelHeight < 1
+  )
+    throw new PlateUnavailableError("Vehicle crop is too small to read");
+  const scaled = document.createElement("canvas");
+  const scale = Math.min(
+    1,
+    PLATE_LIMITS.cropEdge / Math.max(pixelWidth, pixelHeight),
+  );
+  scaled.width = Math.max(1, Math.round(pixelWidth * scale));
+  scaled.height = Math.max(1, Math.round(pixelHeight * scale));
+  scaled
+    .getContext("2d")!
+    .drawImage(
+      canvas,
+      Math.round(crop.x * sourceWidth),
+      Math.round(crop.y * sourceHeight),
+      pixelWidth,
+      pixelHeight,
+      0,
+      0,
+      scaled.width,
+      scaled.height,
+    );
+  try {
+    let blob: Blob | null = null;
+    for (const quality of qualitySteps) {
+      blob = await new Promise<Blob | null>((resolve) =>
+        scaled.toBlob(resolve, "image/jpeg", quality),
+      );
+      if (blob && blob.size <= PLATE_LIMITS.jpegTarget) break;
+    }
+    if (!blob || blob.size > PLATE_LIMITS.jpegBytes)
+      throw new PlateUnavailableError("Plate crop exceeds limit");
+    return {
+      blob,
+      sourceWidth,
+      sourceHeight,
+      encodedWidth: scaled.width,
+      encodedHeight: scaled.height,
+      crop,
+    };
+  } finally {
+    scaled.width = 1;
+    scaled.height = 1;
+  }
+}
 /** Transient congestion drops this frame without invalidating the GPU connection. */
 export class GpuDroppedFrameError extends Error {}
 const minimumSendIntervalMs = 1000 / GPU_LIMITS.maxHz + 5;
@@ -261,8 +329,7 @@ export class RemoteDetector {
                 if (
                   concurrent &&
                   this.effectiveMaxInFlight > 1 &&
-                  ++this.concurrentBusy >=
-                    RemoteDetector.busyBeforeDowngrade
+                  ++this.concurrentBusy >= RemoteDetector.busyBeforeDowngrade
                 ) {
                   this.effectiveMaxInFlight = 1;
                   // Capacity discovery, not congestion: the submission rate
@@ -479,96 +546,67 @@ export class RemoteDetector {
     if (performance.now() - this.lastPlateSentAt < PLATE_LIMITS.minIntervalMs)
       throw new PlateUnavailableError("Plate request rate limited");
     const { crop, ...identity } = request;
-    const sourceWidth = canvas.width;
-    const sourceHeight = canvas.height;
-    const pixelWidth = Math.round(crop.width * sourceWidth);
-    const pixelHeight = Math.round(crop.height * sourceHeight);
+    const snapshot = await capturePlateCrop(canvas, crop, [0.8, 0.65, 0.5]);
+    return this.readPlateSnapshot(snapshot, identity);
+  }
+
+  /** Submit a previously retained report-time crop without needing a live frame. */
+  async readPlateSnapshot(
+    snapshot: PlateCropSnapshot,
+    identity: Omit<PlateRequest, "crop">,
+  ): Promise<PlateResult> {
+    if (!this.plateAvailable || !this.socket)
+      throw new PlateUnavailableError("Plate recognition unavailable");
+    if (this.platePending.size >= PLATE_LIMITS.maxInFlight)
+      throw new PlateUnavailableError("Plate recognition busy");
+    if (performance.now() - this.lastPlateSentAt < PLATE_LIMITS.minIntervalMs)
+      throw new PlateUnavailableError("Plate request rate limited");
+    const jpeg = new Uint8Array(await snapshot.blob.arrayBuffer());
+    const { crop, sourceWidth, sourceHeight, encodedWidth, encodedHeight } =
+      snapshot;
     if (
-      Math.max(pixelWidth, pixelHeight) < PLATE_LIMITS.minCropEdge ||
-      pixelWidth < 1 ||
-      pixelHeight < 1
+      !this.plateAvailable ||
+      this.socket.readyState !== WebSocket.OPEN ||
+      this.platePending.size >= PLATE_LIMITS.maxInFlight
     )
-      throw new PlateUnavailableError("Vehicle crop is too small to read");
-    const scaled = document.createElement("canvas");
-    try {
-      // Never upscale here: enlarging on the phone would only cost bytes, and
-      // the worker resizes to its own OCR scale anyway.
-      const scale = Math.min(
-        1,
-        PLATE_LIMITS.cropEdge / Math.max(pixelWidth, pixelHeight),
+      throw new PlateUnavailableError("Plate recognition unavailable");
+    const full: PlateIdentity = {
+      ...identity,
+      roomId: this.room.roomId,
+      requestId: crypto.randomUUID(),
+    };
+    const packet = encodePlateFrame(
+      {
+        v: 1,
+        type: "camera.plate",
+        format: "image/jpeg",
+        ...full,
+        sourceWidth,
+        sourceHeight,
+        cropX: crop.x,
+        cropY: crop.y,
+        cropWidth: crop.width,
+        cropHeight: crop.height,
+        encodedWidth,
+        encodedHeight,
+        imageLength: jpeg.length,
+      },
+      jpeg,
+    );
+    return await new Promise<PlateResult>((resolve, reject) => {
+      const timer = setTimeout(
+        () => this.settlePlate(full.requestId, null, "timeout"),
+        PLATE_LIMITS.requestTimeoutMs,
       );
-      scaled.width = Math.max(1, Math.round(pixelWidth * scale));
-      scaled.height = Math.max(1, Math.round(pixelHeight * scale));
-      scaled
-        .getContext("2d")!
-        .drawImage(
-          canvas,
-          Math.round(crop.x * sourceWidth),
-          Math.round(crop.y * sourceHeight),
-          pixelWidth,
-          pixelHeight,
-          0,
-          0,
-          scaled.width,
-          scaled.height,
-        );
-      let blob: Blob | null = null;
-      for (const quality of [0.8, 0.65, 0.5]) {
-        blob = await new Promise<Blob | null>((resolve) =>
-          scaled.toBlob(resolve, "image/jpeg", quality),
-        );
-        if (blob && blob.size <= PLATE_LIMITS.jpegTarget) break;
-      }
-      if (!blob || blob.size > PLATE_LIMITS.jpegBytes)
-        throw new PlateUnavailableError("Plate crop exceeds limit");
-      const jpeg = new Uint8Array(await blob.arrayBuffer());
-      if (
-        !this.plateAvailable ||
-        this.socket.readyState !== WebSocket.OPEN ||
-        this.platePending.size >= PLATE_LIMITS.maxInFlight
-      )
-        throw new PlateUnavailableError("Plate recognition unavailable");
-      const full: PlateIdentity = {
-        ...identity,
-        roomId: this.room.roomId,
-        requestId: crypto.randomUUID(),
-      };
-      const packet = encodePlateFrame(
-        {
-          v: 1,
-          type: "camera.plate",
-          format: "image/jpeg",
-          ...full,
-          sourceWidth,
-          sourceHeight,
-          cropX: crop.x,
-          cropY: crop.y,
-          cropWidth: crop.width,
-          cropHeight: crop.height,
-          encodedWidth: scaled.width,
-          encodedHeight: scaled.height,
-          imageLength: jpeg.length,
-        },
-        jpeg,
-      );
-      return await new Promise<PlateResult>((resolve, reject) => {
-        const timer = setTimeout(
-          () => this.settlePlate(full.requestId, null, "timeout"),
-          PLATE_LIMITS.requestTimeoutMs,
-        );
-        this.platePending.set(full.requestId, {
-          identity: full,
-          resolve,
-          reject,
-          timer,
-        });
-        this.socket!.send(packet.buffer as ArrayBuffer);
-        this.lastPlateSentAt = performance.now();
+      this.platePending.set(full.requestId, {
+        identity: full,
+        resolve,
+        reject,
+        timer,
       });
-    } finally {
-      scaled.width = 1;
-      scaled.height = 1;
-    }
+      this.socket!.send(packet.buffer as ArrayBuffer);
+      this.lastPlateSentAt = performance.now();
+    });
   }
   private drop(reason: string): GpuDroppedFrameError {
     this.measurements.dropped++;
@@ -601,7 +639,11 @@ export class RemoteDetector {
       promise.then(
         (value) => {
           signal.removeEventListener("abort", canceled);
-          if (signal.aborted || this.disposed || !this.operations.has(operation)) {
+          if (
+            signal.aborted ||
+            this.disposed ||
+            !this.operations.has(operation)
+          ) {
             canceled();
             return;
           }

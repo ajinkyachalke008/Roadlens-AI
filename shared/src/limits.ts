@@ -85,6 +85,12 @@ export const PLATE_LIMITS = Object.freeze({
   maxInFlight: 1,
   /** Bounded candidate crops retained and submitted per track. */
   framesPerTrack: 4,
+  /** Raw report-target crops retained briefly for one bounded rescue pass. */
+  rescueFrames: 4,
+  rescueReports: 2,
+  rescueTtlMs: 3_000,
+  rescueBytes: 8 * 96 * 1024,
+  rescueRetriesPerCrop: 1,
   /** Bounded number of tracks under plate analysis at once. */
   tracks: 8,
   /** Submission floor, independent of the analysis rate. */

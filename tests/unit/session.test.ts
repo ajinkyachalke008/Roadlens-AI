@@ -475,6 +475,41 @@ describe("B22/B24/B46 RAM report and evidence stores (synthetic metadata)", () =
       store.episodeId("synthetic-epoch:1:speed_candidate:policy:0"),
     ).not.toBe(first);
   });
+  it("publishes a new revision when plate localization evidence improves", () => {
+    const store = new SessionStore();
+    const published = vi.fn();
+    store.onReport = published;
+    const saved = store.save(
+      frame(),
+      policy(),
+      undefined,
+      "observation",
+      1,
+      uuid(1900),
+      undefined,
+      {
+        plateStatus: "unreadable",
+        plateText: null,
+        plateConfidence: null,
+        plateSupportingFrames: 0,
+        plateDetectorConfidence: null,
+      },
+    );
+    expect(
+      store.applyPlate(saved.reportId, {
+        plateStatus: "unreadable",
+        plateText: null,
+        plateConfidence: null,
+        plateSupportingFrames: 0,
+        plateDetectorConfidence: 0.84,
+      }),
+    ).toBe(true);
+    expect(store.reports.get(saved.reportId)).toMatchObject({
+      revision: 1,
+      plateDetectorConfidence: 0.84,
+    });
+    expect(published).toHaveBeenCalledTimes(2);
+  });
 });
 describe("B25 explicit safe JSON/CSV exports", () => {
   it("preserves null speed and excludes pairing capabilities from JSON", () => {

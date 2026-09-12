@@ -26,7 +26,9 @@ export function plateLabel(report: Report) {
     case "pending":
       return "Analyzing…";
     case "unreadable":
-      return "Unreadable";
+      return typeof report.plateDetectorConfidence === "number"
+        ? "Plate located · text unreadable"
+        : "Unreadable";
     case "unavailable":
       return "Plate unavailable";
     default:
@@ -325,6 +327,8 @@ export function Reports({
                 <dd
                   data-testid="report-plate"
                   data-plate-status={report.plateStatus}
+                  aria-live="polite"
+                  aria-atomic="true"
                   title={
                     report.plateStatus === "read"
                       ? `Agreed across ${report.plateSupportingFrames ?? 0} frames`
@@ -333,6 +337,15 @@ export function Reports({
                 >
                   {plateLabel(report)}
                 </dd>
+                {report.plateStatus === "read" && (
+                  <>
+                    <dt>Plate support</dt>
+                    <dd data-testid="report-plate-support">
+                      Confirmed from {report.plateSupportingFrames ?? 0}{" "}
+                      distinct frames
+                    </dd>
+                  </>
+                )}
               </>
             )}
             <dt>Speed status</dt>

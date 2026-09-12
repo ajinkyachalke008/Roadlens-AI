@@ -8,11 +8,16 @@ import {
 import { cropQuality } from "../../frontend/src/plates/quality";
 import { plateFields } from "../../frontend/src/plates/report";
 import { PlateCapture } from "../../frontend/src/plates/capture";
-import { PlateUnavailableError } from "../../frontend/src/inference/remote";
+import {
+  capturePlateCrop,
+  PlateUnavailableError,
+} from "../../frontend/src/inference/remote";
 import type {
+  PlateCropSnapshot,
   PlateRequest,
   RemoteDetector,
 } from "../../frontend/src/inference/remote";
+import { plateLabel } from "../../frontend/src/components/Reports";
 import type { FrameResult, TrackView } from "../../shared/src/schemas";
 import { frame as frameFixture } from "../contracts/fixtures";
 
@@ -74,7 +79,10 @@ describe("B40 plate multi-frame consensus", () => {
     expect(result.plateConfidence).toBeNull();
   });
   it("counts frames that read nothing as evidence against a lone reading", () => {
-    const supported = plateConsensus([look("ABC1234", 0.95), look("ABC1234", 0.94)]);
+    const supported = plateConsensus([
+      look("ABC1234", 0.95),
+      look("ABC1234", 0.94),
+    ]);
     const contradicted = plateConsensus([
       look("ABC1234", 0.95),
       look("ABC1234", 0.94),
@@ -86,6 +94,16 @@ describe("B40 plate multi-frame consensus", () => {
     expect(supported.plateConfidence).toBeGreaterThan(
       contradicted.plateConfidence ?? 0,
     );
+  });
+  it("counts several transforms of one captured image as one supporting frame", () => {
+    const result = plateConsensus([
+      { ...look("ABC1234", 0.97), sourceFrame: "epoch:1:100" },
+      { ...look("ABC1234", 0.96), sourceFrame: "epoch:1:100" },
+      { ...look("ABC1234", 0.95), sourceFrame: "epoch:1:100" },
+    ]);
+    expect(result.plateText).toBeNull();
+    expect(result.supportingFrames).toBe(1);
+    expect(result.observations).toBe(1);
   });
   it("reports nothing at all when no frame produced a reading", () => {
     const result = plateConsensus([look(null, null), look(null, null)]);
@@ -109,9 +127,7 @@ const candidate = (over: Partial<Parameters<typeof cropQuality>[0]> = {}) => ({
 
 describe("B41 plate crop selection and quality ranking", () => {
   it("refuses a crop with too few real pixels to hold a plate", () => {
-    expect(
-      cropQuality(candidate({ bbox: [0.5, 0.5, 0.51, 0.51] })),
-    ).toBe(0);
+    expect(cropQuality(candidate({ bbox: [0.5, 0.5, 0.51, 0.51] }))).toBe(0);
   });
   it("prefers the larger crop of the same vehicle", () => {
     expect(cropQuality(candidate())).toBeGreaterThan(
@@ -176,6 +192,14 @@ describe("B42 plate report projection", () => {
       plateDetectorConfidence: null,
     });
   });
+  it("distinguishes a located plate whose text could not be read", () => {
+    const report = {
+      ...frameFixture(1),
+      plateStatus: "unreadable",
+      plateDetectorConfidence: 0.84,
+    } as unknown as Parameters<typeof plateLabel>[0];
+    expect(plateLabel(report)).toBe("Plate located · text unreadable");
+  });
 });
 
 /** Minimal canvas stand-in: the controller only needs its pixel dimensions. */
@@ -183,13 +207,20 @@ const fakeCanvas = (width = 1920, height = 1080) =>
   ({
     width,
     height,
-    getContext: () => null,
+    getContext: () => ({
+      drawImage: vi.fn(),
+      getImageData: () => ({ data: new Uint8ClampedArray(96 * 96 * 4) }),
+    }),
+    toBlob: (resolve: (blob: Blob) => void) =>
+      resolve(new Blob([new Uint8Array(256)], { type: "image/jpeg" })),
   }) as unknown as HTMLCanvasElement;
 interface FakeRemote {
   plateAvailable: boolean;
   plateInFlight: number;
   calls: { trackId: number; captureEpoch: string }[];
+  frames: string[];
   readPlate: RemoteDetector["readPlate"];
+  readPlateSnapshot: RemoteDetector["readPlateSnapshot"];
 }
 const track = (over: Partial<TrackView> = {}): TrackView => ({
   trackId: 1,
@@ -203,7 +234,11 @@ const track = (over: Partial<TrackView> = {}): TrackView => ({
   ruleState: "candidate",
   ...over,
 });
-const analysed = (seq: number, tracks: TrackView[], epoch?: string): FrameResult => {
+const analysed = (
+  seq: number,
+  tracks: TrackView[],
+  epoch?: string,
+): FrameResult => {
   const base = frameFixture(seq);
   const captureEpoch = epoch ?? base.captureEpoch;
   return {
@@ -219,38 +254,44 @@ function fakeRemote(
   reply: (trackId: number, call: number) => unknown = () => ({}),
 ): FakeRemote {
   let call = 0;
+  const respond = async (request: Omit<PlateRequest, "crop">) => {
+    remote.calls.push({
+      trackId: request.trackId,
+      captureEpoch: request.captureEpoch,
+    });
+    remote.frames.push(request.frameId);
+    const answer = reply(request.trackId, call++);
+    if (answer instanceof Error) throw answer;
+    return {
+      ...request,
+      roomId: "00000000-0000-4000-8000-000000000000",
+      requestId: crypto.randomUUID(),
+      detectorId: "plate-detector-v1",
+      detectorSha256: "b".repeat(64),
+      ocrEngine: "fast-plate-ocr",
+      inputSize: 640,
+      plateText: "ABC1234",
+      plateConfidence: 0.93,
+      detectorConfidence: 0.85,
+      plateBox: [0.1, 0.2, 0.6, 0.4],
+      metrics: { decodeMs: 1, detectMs: 3, ocrMs: 4, totalMs: 8 },
+      v: 1,
+      type: "plate.result",
+      ...(answer as object),
+    };
+  };
   const remote: FakeRemote = {
     plateAvailable: true,
     plateInFlight: 0,
     calls: [],
-    readPlate: (async (
-      _canvas: HTMLCanvasElement,
-      request: PlateRequest,
-    ) => {
-      remote.calls.push({
-        trackId: request.trackId,
-        captureEpoch: request.captureEpoch,
-      });
-      const answer = reply(request.trackId, call++);
-      if (answer instanceof Error) throw answer;
-      return {
-        ...request,
-        roomId: "00000000-0000-4000-8000-000000000000",
-        requestId: crypto.randomUUID(),
-        detectorId: "plate-detector-v1",
-        detectorSha256: "b".repeat(64),
-        ocrEngine: "fast-plate-ocr",
-        inputSize: 640,
-        plateText: "ABC1234",
-        plateConfidence: 0.93,
-        detectorConfidence: 0.85,
-        plateBox: [0.1, 0.2, 0.6, 0.4],
-        metrics: { decodeMs: 1, detectMs: 3, ocrMs: 4, totalMs: 8 },
-        v: 1,
-        type: "plate.result",
-        ...(answer as object),
-      };
+    frames: [],
+    readPlate: (async (_canvas: HTMLCanvasElement, request: PlateRequest) => {
+      return respond(request);
     }) as unknown as RemoteDetector["readPlate"],
+    readPlateSnapshot: (async (
+      _snapshot: PlateCropSnapshot,
+      request: Omit<PlateRequest, "crop">,
+    ) => respond(request)) as RemoteDetector["readPlateSnapshot"],
   };
   return remote;
 }
@@ -445,6 +486,7 @@ describe("B43 bounded event-driven plate capture", () => {
     }
     expect(plates.state(1).status).toBe("unreadable");
     expect(plates.state(1).plateText).toBeNull();
+    expect(plates.state(1).detectorConfidence).toBe(0.85);
   });
   it("settles on a reading once enough frames agree", async () => {
     const remote = fakeRemote();
@@ -604,9 +646,7 @@ describe("B45 plate analysis always reaches a verdict", () => {
   });
 
   it("never leaves a requested vehicle pending forever", async () => {
-    const remote = fakeRemote(
-      () => new PlateUnavailableError("plate_failed"),
-    );
+    const remote = fakeRemote(() => new PlateUnavailableError("plate_failed"));
     plates.mode = "off";
     plates.request(1);
     plates.observe(
@@ -617,5 +657,168 @@ describe("B45 plate analysis always reaches a verdict", () => {
     await settle();
     clock += PLATE_LIMITS.analysisDeadlineMs;
     expect(plates.state(1).status).toBe("unreadable");
+  });
+});
+
+describe("B46 report-target raw crop rescue", () => {
+  let clock: number;
+  let plates: PlateCapture;
+  beforeEach(() => {
+    clock = 0;
+    plates = new PlateCapture(() => clock);
+    (globalThis as { document?: unknown }).document = {
+      createElement: () => fakeCanvas(8, 8),
+    };
+  });
+
+  it("copies only original pixels into the raw crop before any annotation", async () => {
+    const drawImage = vi.fn();
+    const encoded = {
+      width: 0,
+      height: 0,
+      getContext: () => ({ drawImage }),
+      toBlob: (resolve: (blob: Blob) => void) =>
+        resolve(new Blob([new Uint8Array(128)], { type: "image/jpeg" })),
+    } as unknown as HTMLCanvasElement;
+    (globalThis as { document?: unknown }).document = {
+      createElement: () => encoded,
+    };
+    const source = fakeCanvas(1920, 1080);
+    const snapshot = await capturePlateCrop(source, {
+      x: 0.25,
+      y: 0.2,
+      width: 0.5,
+      height: 0.4,
+    });
+    expect(drawImage).toHaveBeenCalledWith(
+      source,
+      480,
+      216,
+      960,
+      432,
+      0,
+      0,
+      640,
+      288,
+    );
+    expect(snapshot).toMatchObject({
+      sourceWidth: 1920,
+      sourceHeight: 1080,
+      encodedWidth: 640,
+      encodedHeight: 288,
+    });
+  });
+
+  it("reads the exact report frame after the vehicle has left", async () => {
+    const remote = fakeRemote();
+    const frame = analysed(17, [track({ ruleState: "normal" })]);
+    expect(
+      plates.beginReportRescue(frame, fakeCanvas(), asRemote(remote), 1),
+    ).toBe(true);
+    await settle();
+    clock += PLATE_LIMITS.minIntervalMs;
+    const second = analysed(
+      18,
+      [track({ ruleState: "normal" })],
+      frame.captureEpoch,
+    );
+    plates.observe(second, fakeCanvas(), asRemote(remote));
+    await settle();
+    // The vehicle may now leave: both independent observations came from the
+    // retained raw report window, beginning with the exact report frame.
+    expect(remote.frames).toEqual([frame.frameId, second.frameId]);
+    expect(plates.state(1)).toMatchObject({
+      status: "read",
+      plateText: "ABC1234",
+      supportingFrames: 2,
+    });
+    // Confirmation destroys every rescue pixel immediately.
+    expect(plates.diagnostics.rescueCrops).toBe(0);
+    plates.reset();
+  });
+
+  it("keeps rescue pixels inside their separate hard byte and crop bounds", async () => {
+    const remote = fakeRemote(() => new PlateUnavailableError("busy"));
+    plates.beginReportRescue(
+      analysed(1, [track()]),
+      fakeCanvas(),
+      asRemote(remote),
+      1,
+    );
+    for (let seq = 2; seq <= 12; seq++) {
+      clock += 100;
+      plates.observe(analysed(seq, [track()]), fakeCanvas(), asRemote(remote));
+      await settle();
+    }
+    expect(plates.diagnostics.rescueCrops).toBeLessThanOrEqual(
+      PLATE_LIMITS.rescueFrames,
+    );
+    expect(plates.diagnostics.rescueQueued).toBeLessThanOrEqual(
+      PLATE_LIMITS.rescueFrames,
+    );
+    expect(plates.diagnostics.rescueBytes).toBeLessThanOrEqual(
+      PLATE_LIMITS.rescueBytes,
+    );
+    plates.reset();
+    expect(plates.diagnostics.rescueBytes).toBe(0);
+  });
+
+  it("clears all retained rescue pixels on capture reset", async () => {
+    const remote = fakeRemote();
+    plates.beginReportRescue(
+      analysed(1, [track()]),
+      fakeCanvas(),
+      asRemote(remote),
+      1,
+    );
+    await settle();
+    expect(plates.diagnostics.rescueBytes).toBeGreaterThan(0);
+    plates.reset();
+    expect(plates.diagnostics).toMatchObject({
+      rescueReports: 0,
+      rescueCrops: 0,
+      rescueQueued: 0,
+      rescueBytes: 0,
+    });
+  });
+
+  it("expires rescue pixels after the short TTL", async () => {
+    vi.useFakeTimers();
+    try {
+      const remote = fakeRemote();
+      plates.beginReportRescue(
+        analysed(1, [track()]),
+        fakeCanvas(),
+        asRemote(remote),
+        1,
+      );
+      await settle();
+      expect(plates.diagnostics.rescueBytes).toBeGreaterThan(0);
+      await vi.advanceTimersByTimeAsync(PLATE_LIMITS.rescueTtlMs);
+      expect(plates.diagnostics.rescueBytes).toBe(0);
+    } finally {
+      plates.reset();
+      vi.useRealTimers();
+    }
+  });
+
+  it("retries a busy retained crop only once", async () => {
+    vi.useFakeTimers();
+    try {
+      const remote = fakeRemote(() => new PlateUnavailableError("busy"));
+      plates.beginReportRescue(
+        analysed(1, [track()]),
+        fakeCanvas(),
+        asRemote(remote),
+        1,
+      );
+      await settle();
+      clock += PLATE_LIMITS.minIntervalMs * 4;
+      await vi.advanceTimersByTimeAsync(PLATE_LIMITS.minIntervalMs * 4);
+      expect(remote.calls).toHaveLength(1 + PLATE_LIMITS.rescueRetriesPerCrop);
+    } finally {
+      plates.reset();
+      vi.useRealTimers();
+    }
   });
 });

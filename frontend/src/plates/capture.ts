@@ -1,7 +1,9 @@
 import { PLATE_LIMITS } from "../../../shared/src/limits";
 import type { FrameResult, TrackView } from "../../../shared/src/schemas";
 import {
+  capturePlateCrop,
   PlateUnavailableError,
+  type PlateCropSnapshot,
   type RemoteDetector,
 } from "../inference/remote";
 import { cropQuality, cropSharpness } from "./quality";
@@ -21,11 +23,7 @@ import { plateConsensus, type PlateObservation } from "./consensus";
  */
 export type PlateCaptureMode = "off" | "candidates" | "all";
 export type PlateTrackStatus =
-  | "idle"
-  | "pending"
-  | "read"
-  | "unreadable"
-  | "unavailable";
+  "idle" | "pending" | "read" | "unreadable" | "unavailable";
 export interface PlateTrackState {
   status: PlateTrackStatus;
   plateText: string | null;
@@ -43,10 +41,26 @@ export interface PlateTrackState {
 interface Candidate {
   quality: number;
   bbox: readonly [number, number, number, number];
+  sourceId: string;
+  sourceWidth: number;
+  sourceHeight: number;
+  sharpness: number;
   frameSeq: number;
   frameId: string;
   sourceTimeMs: number;
   submitted: boolean;
+}
+interface RescueCandidate extends Candidate {
+  snapshot: PlateCropSnapshot | null;
+  encoding: boolean;
+  failures: number;
+}
+interface RescueRecord {
+  captureEpoch: string;
+  trackId: number;
+  expiresAt: number;
+  candidates: RescueCandidate[];
+  timer: ReturnType<typeof setTimeout>;
 }
 interface TrackRecord {
   candidates: Candidate[];
@@ -56,6 +70,7 @@ interface TrackRecord {
   requested: boolean;
   /** Last successful localisation, already mapped into frame coordinates. */
   plateBox: readonly [number, number, number, number] | null;
+  detectorConfidence: number | null;
   /** When this track entered the pipeline, for the analysis deadline. */
   startedAt: number;
 }
@@ -72,6 +87,9 @@ export class PlateCapture {
   private unavailable = false;
   private epoch: string | null = null;
   private tracks = new Map<number, TrackRecord>();
+  private rescues = new Map<number, RescueRecord>();
+  private rescueBytes = 0;
+  private retryTimer: ReturnType<typeof setTimeout> | null = null;
   private explicit = new Set<number>();
   /** When each explicit request was made, so the card always resolves. */
   private requestedAt = new Map<number, number>();
@@ -81,6 +99,14 @@ export class PlateCapture {
   private completedTotal = 0;
   private refusedTotal = 0;
   private latencies: number[] = [];
+  private lastCrop = {
+    vehicleWidth: 0,
+    vehicleHeight: 0,
+    sharpness: 0,
+    quality: 0,
+    plateWidth: 0,
+    plateHeight: 0,
+  };
 
   get diagnostics() {
     const sorted = [...this.latencies].sort((a, b) => a - b);
@@ -94,14 +120,31 @@ export class PlateCapture {
       inFlight: this.busy ? 1 : 0,
       medianMs: sorted.length ? sorted[Math.floor(sorted.length / 2)]! : 0,
       maxMs: sorted.length ? sorted.at(-1)! : 0,
+      rescueReports: this.rescues.size,
+      rescueCrops: [...this.rescues.values()].reduce(
+        (total, rescue) =>
+          total + rescue.candidates.filter((item) => item.snapshot).length,
+        0,
+      ),
+      rescueQueued: [...this.rescues.values()].reduce(
+        (total, rescue) => total + rescue.candidates.length,
+        0,
+      ),
+      rescueBytes: this.rescueBytes,
+      lastCrop: { ...this.lastCrop },
     };
   }
 
   /** Discard every crop, reading and consensus. Called on epoch change and End session. */
   reset() {
+    for (const rescue of this.rescues.values()) clearTimeout(rescue.timer);
+    this.rescues.clear();
+    this.rescueBytes = 0;
+    if (this.retryTimer) clearTimeout(this.retryTimer);
+    this.retryTimer = null;
     this.tracks.clear();
     this.explicit.clear();
-        this.requestedAt.clear();
+    this.requestedAt.clear();
     this.epoch = null;
     this.busy = false;
     this.unavailable = false;
@@ -110,6 +153,14 @@ export class PlateCapture {
     this.completedTotal = 0;
     this.refusedTotal = 0;
     this.latencies = [];
+    this.lastCrop = {
+      vehicleWidth: 0,
+      vehicleHeight: 0,
+      sharpness: 0,
+      quality: 0,
+      plateWidth: 0,
+      plateHeight: 0,
+    };
     this.onChange();
   }
 
@@ -180,7 +231,8 @@ export class PlateCapture {
       plateText: consensus.plateText,
       plateConfidence: consensus.plateConfidence,
       supportingFrames: consensus.supportingFrames,
-      detectorConfidence: consensus.detectorConfidence,
+      detectorConfidence:
+        consensus.detectorConfidence ?? record.detectorConfidence,
       submitted: record.submitted,
       plateBox: record.plateBox,
     };
@@ -207,14 +259,18 @@ export class PlateCapture {
         this.tracks.delete(trackId);
         this.explicit.delete(trackId);
         this.requestedAt.delete(trackId);
+        this.clearRescue(trackId);
         return true;
       }
     return false;
   }
 
-  private padded(
-    bbox: readonly [number, number, number, number],
-  ): { x: number; y: number; width: number; height: number } {
+  private padded(bbox: readonly [number, number, number, number]): {
+    x: number;
+    y: number;
+    width: number;
+    height: number;
+  } {
     const padX = (bbox[2] - bbox[0]) * CROP_PADDING;
     const padY = (bbox[3] - bbox[1]) * CROP_PADDING;
     const x = Math.max(0, bbox[0] - padX);
@@ -225,6 +281,179 @@ export class PlateCapture {
       width: Math.min(1 - x, bbox[2] - bbox[0] + padX * 2),
       height: Math.min(1 - y, bbox[3] - bbox[1] + padY * 2),
     };
+  }
+
+  private clearRescue(trackId: number) {
+    const rescue = this.rescues.get(trackId);
+    if (!rescue) return;
+    clearTimeout(rescue.timer);
+    for (const candidate of rescue.candidates)
+      if (candidate.snapshot) this.rescueBytes -= candidate.snapshot.blob.size;
+    this.rescues.delete(trackId);
+    this.rescueBytes = Math.max(0, this.rescueBytes);
+  }
+
+  private schedulePump(remote: RemoteDetector) {
+    if (this.retryTimer || this.rescues.size === 0) return;
+    const remaining = Math.max(
+      0,
+      PLATE_LIMITS.minIntervalMs - (this.clock() - this.lastSubmittedAt),
+    );
+    this.retryTimer = setTimeout(() => {
+      this.retryTimer = null;
+      void this.pump(remote);
+    }, remaining);
+  }
+
+  private recordFor(trackId: number) {
+    let record = this.tracks.get(trackId);
+    if (!record) {
+      if (this.tracks.size >= PLATE_LIMITS.tracks && !this.evict()) return null;
+      record = {
+        candidates: [],
+        observations: [],
+        submitted: 0,
+        inFlight: false,
+        requested: false,
+        plateBox: null,
+        detectorConfidence: null,
+        startedAt: this.clock(),
+      };
+      this.tracks.set(trackId, record);
+    }
+    return record;
+  }
+
+  /**
+   * Lock the exact report-time vehicle pixels before evidence annotation. The
+   * returned promise is intentionally not awaited by the frame callback: the
+   * crop copy is synchronous and JPEG encoding completes off the hot path.
+   */
+  beginReportRescue(
+    frame: FrameResult,
+    canvas: HTMLCanvasElement,
+    remote: RemoteDetector | null | undefined,
+    trackId: number,
+  ) {
+    if (!remote?.plateAvailable) return false;
+    const track = frame.tracks.find(
+      (candidate) =>
+        candidate.observed &&
+        candidate.trackId === trackId &&
+        VEHICLES.has(candidate.className),
+    );
+    if (!track || (frame.captureEpoch !== this.epoch && this.epoch !== null))
+      return false;
+    this.epoch = frame.captureEpoch;
+    const record = this.recordFor(trackId);
+    if (!record) return false;
+    this.explicit.add(trackId);
+    this.requestedAt.set(
+      trackId,
+      this.requestedAt.get(trackId) ?? this.clock(),
+    );
+    if (!this.rescues.has(trackId)) {
+      while (this.rescues.size >= PLATE_LIMITS.rescueReports) {
+        const oldest = this.rescues.keys().next().value as number | undefined;
+        if (oldest === undefined) break;
+        this.clearRescue(oldest);
+      }
+      const expiresAt = this.clock() + PLATE_LIMITS.rescueTtlMs;
+      const timer = setTimeout(() => {
+        this.clearRescue(trackId);
+        this.onChange();
+      }, PLATE_LIMITS.rescueTtlMs);
+      this.rescues.set(trackId, {
+        captureEpoch: frame.captureEpoch,
+        trackId,
+        expiresAt,
+        candidates: [],
+        timer,
+      });
+    }
+    this.captureRescue(frame, canvas, remote, track);
+    this.onChange();
+    return true;
+  }
+
+  private captureRescue(
+    frame: FrameResult,
+    canvas: HTMLCanvasElement,
+    remote: RemoteDetector,
+    track: TrackView,
+  ) {
+    const rescue = this.rescues.get(track.trackId);
+    if (
+      !rescue ||
+      rescue.captureEpoch !== frame.captureEpoch ||
+      this.clock() > rescue.expiresAt ||
+      rescue.candidates.some((candidate) => candidate.frameId === frame.frameId)
+    )
+      return;
+    const sharpness = cropSharpness(canvas, track.bbox);
+    const quality = cropQuality({
+      bbox: track.bbox,
+      sourceWidth: frame.frameWidth,
+      sourceHeight: frame.frameHeight,
+      detectionScore: track.score,
+      sharpness,
+    });
+    if (quality <= 0) return;
+    if (rescue.candidates.length >= PLATE_LIMITS.rescueFrames) {
+      const weakest = [...rescue.candidates]
+        .filter((entry) => !entry.submitted && !entry.encoding)
+        .sort((a, b) => a.quality - b.quality)[0];
+      if (!weakest || weakest.quality >= quality) return;
+      rescue.candidates.splice(rescue.candidates.indexOf(weakest), 1);
+      if (weakest.snapshot) this.rescueBytes -= weakest.snapshot.blob.size;
+    }
+    const candidate: RescueCandidate = {
+      quality,
+      bbox: track.bbox,
+      sourceId: frame.sourceId,
+      sourceWidth: frame.frameWidth,
+      sourceHeight: frame.frameHeight,
+      sharpness,
+      frameSeq: frame.frameSeq,
+      frameId: frame.frameId,
+      sourceTimeMs: frame.sourceTimeMs,
+      submitted: false,
+      snapshot: null,
+      encoding: true,
+      failures: 0,
+    };
+    rescue.candidates.push(candidate);
+    void capturePlateCrop(canvas, this.padded(track.bbox))
+      .then((snapshot) => {
+        const current = this.rescues.get(track.trackId);
+        if (!current || !current.candidates.includes(candidate)) return;
+        candidate.encoding = false;
+        candidate.snapshot = snapshot;
+        this.rescueBytes += snapshot.blob.size;
+        current.candidates.sort((a, b) => b.quality - a.quality);
+        while (
+          current.candidates.length > PLATE_LIMITS.rescueFrames ||
+          this.rescueBytes > PLATE_LIMITS.rescueBytes
+        ) {
+          const removable = [...current.candidates]
+            .reverse()
+            .find((entry) => !entry.submitted && !entry.encoding);
+          if (!removable) break;
+          const index = current.candidates.indexOf(removable);
+          current.candidates.splice(index, 1);
+          if (removable.snapshot)
+            this.rescueBytes -= removable.snapshot.blob.size;
+        }
+        void this.pump(remote);
+        this.onChange();
+      })
+      .catch(() => {
+        const current = this.rescues.get(track.trackId);
+        if (current)
+          current.candidates = current.candidates.filter(
+            (entry) => entry !== candidate,
+          );
+      });
   }
 
   /**
@@ -255,9 +484,10 @@ export class PlateCapture {
       // to the tracks in this one. Adopting the *first* epoch is not a change:
       // a vehicle selected just before analysis starts must still be read.
       if (this.epoch !== null) {
+        for (const trackId of this.rescues.keys()) this.clearRescue(trackId);
         this.tracks.clear();
         this.explicit.clear();
-    this.requestedAt.clear();
+        this.requestedAt.clear();
         this.busy = false;
       }
       this.epoch = frame.captureEpoch;
@@ -274,29 +504,31 @@ export class PlateCapture {
       let record = this.tracks.get(track.trackId);
       if (!record) {
         if (this.tracks.size >= PLATE_LIMITS.tracks && !this.evict()) continue;
-        record = {
-          candidates: [],
-          observations: [],
-          submitted: 0,
-          inFlight: false,
-          requested: false,
-          plateBox: null,
-          startedAt: this.clock(),
-        };
-        this.tracks.set(track.trackId, record);
+        const created = this.recordFor(track.trackId);
+        if (!created) continue;
+        record = created;
       }
       if (record.submitted >= PLATE_LIMITS.framesPerTrack) continue;
+      if (this.rescues.has(track.trackId)) {
+        this.captureRescue(frame, canvas, remote, track);
+        continue;
+      }
+      const sharpness = cropSharpness(canvas, track.bbox);
       const quality = cropQuality({
         bbox: track.bbox,
         sourceWidth: frame.frameWidth,
         sourceHeight: frame.frameHeight,
         detectionScore: track.score,
-        sharpness: cropSharpness(canvas, track.bbox),
+        sharpness,
       });
       if (quality <= 0) continue;
       const current: Candidate = {
         quality,
         bbox: track.bbox,
+        sourceId: frame.sourceId,
+        sourceWidth: frame.frameWidth,
+        sourceHeight: frame.frameHeight,
+        sharpness,
         frameSeq: frame.frameSeq,
         frameId: frame.frameId,
         sourceTimeMs: frame.sourceTimeMs,
@@ -328,31 +560,52 @@ export class PlateCapture {
           record.candidates[worst] = current;
       }
     }
-    void this.pump(frame, canvas, remote);
+    void this.pump(remote, { frame, canvas });
   }
 
   /** Submit at most one crop, and only when nothing else is outstanding. */
   private async pump(
-    frame: FrameResult,
-    canvas: HTMLCanvasElement,
     remote: RemoteDetector,
+    current?: { frame: FrameResult; canvas: HTMLCanvasElement },
   ) {
     if (this.busy || remote.plateInFlight >= PLATE_LIMITS.maxInFlight) return;
-    if (performance.now() - this.lastSubmittedAt < PLATE_LIMITS.minIntervalMs)
+    if (this.clock() - this.lastSubmittedAt < PLATE_LIMITS.minIntervalMs)
       return;
-    let chosen: { trackId: number; record: TrackRecord; candidate: Candidate } | null =
-      null;
+    let chosen: {
+      trackId: number;
+      record: TrackRecord;
+      candidate: Candidate | RescueCandidate;
+      rescue: boolean;
+    } | null = null;
+    for (const [trackId, rescue] of this.rescues) {
+      const record = this.tracks.get(trackId);
+      if (
+        !record ||
+        record.inFlight ||
+        record.submitted >= PLATE_LIMITS.framesPerTrack
+      )
+        continue;
+      const candidate = rescue.candidates.find(
+        (entry) => !entry.submitted && !!entry.snapshot,
+      );
+      if (
+        candidate &&
+        (!chosen || candidate.quality > chosen.candidate.quality)
+      )
+        chosen = { trackId, record, candidate, rescue: true };
+    }
     for (const [trackId, record] of this.tracks) {
+      if (chosen) break;
       if (record.inFlight || record.submitted >= PLATE_LIMITS.framesPerTrack)
         continue;
       // Only a crop from this very frame can be cropped from this canvas; older
       // candidates describe pixels that no longer exist anywhere.
       const candidate = record.candidates.find(
-        (entry) => !entry.submitted && entry.frameSeq === frame.frameSeq,
+        (entry) =>
+          !entry.submitted && entry.frameSeq === current?.frame.frameSeq,
       );
       if (!candidate) continue;
-      if (!chosen || candidate.quality > chosen.candidate.quality)
-        chosen = { trackId, record, candidate };
+      chosen = { trackId, record, candidate, rescue: false };
     }
     if (!chosen) return;
     const { trackId, record, candidate } = chosen;
@@ -361,18 +614,43 @@ export class PlateCapture {
     candidate.submitted = true;
     record.submitted++;
     this.submittedTotal++;
-    this.lastSubmittedAt = performance.now();
+    this.lastSubmittedAt = this.clock();
     const started = performance.now();
+    const crop = chosen.rescue
+      ? (candidate as RescueCandidate).snapshot!.crop
+      : this.padded(candidate.bbox);
+    const vehicleWidth = Math.round(crop.width * candidate.sourceWidth);
+    const vehicleHeight = Math.round(crop.height * candidate.sourceHeight);
+    const encodedScale = Math.min(
+      1,
+      PLATE_LIMITS.cropEdge / Math.max(vehicleWidth, vehicleHeight),
+    );
+    this.lastCrop = {
+      vehicleWidth,
+      vehicleHeight,
+      sharpness: candidate.sharpness,
+      quality: candidate.quality,
+      plateWidth: 0,
+      plateHeight: 0,
+    };
     try {
-      const result = await remote.readPlate(canvas, {
-        sourceId: frame.sourceId,
-        captureEpoch: frame.captureEpoch,
+      const rescueCandidate = chosen.rescue
+        ? (chosen.candidate as RescueCandidate)
+        : null;
+      const identity = {
+        sourceId: candidate.sourceId,
+        captureEpoch: this.epoch!,
         frameSeq: candidate.frameSeq,
         frameId: candidate.frameId,
         trackId,
         sourceTimeMs: candidate.sourceTimeMs,
-        crop: this.padded(candidate.bbox),
-      });
+      };
+      const result = rescueCandidate?.snapshot
+        ? await remote.readPlateSnapshot(rescueCandidate.snapshot, identity)
+        : await remote.readPlate(current!.canvas, {
+            ...identity,
+            crop: this.padded(candidate.bbox),
+          });
       // Reject anything that belongs to a session, epoch or track this
       // controller has already moved past.
       if (
@@ -386,28 +664,59 @@ export class PlateCapture {
         confidence: result.plateConfidence,
         detectorConfidence: result.detectorConfidence,
         quality: candidate.quality,
+        sourceFrame: `${result.captureEpoch}:${result.frameSeq}:${result.sourceTimeMs}`,
       });
+      if (result.detectorConfidence !== null)
+        record.detectorConfidence = Math.max(
+          record.detectorConfidence ?? 0,
+          result.detectorConfidence,
+        );
       // The worker reports the plate box inside the crop it was sent. Mapping it
       // back through that crop is the only way it means anything to the overlay.
       if (result.plateBox) {
-        const c = this.padded(candidate.bbox);
+        const c =
+          rescueCandidate?.snapshot?.crop ?? this.padded(candidate.bbox);
         record.plateBox = [
           c.x + result.plateBox[0] * c.width,
           c.y + result.plateBox[1] * c.height,
           c.x + result.plateBox[2] * c.width,
           c.y + result.plateBox[3] * c.height,
         ];
+        const encodedWidth =
+          rescueCandidate?.snapshot?.encodedWidth ??
+          Math.round(vehicleWidth * encodedScale);
+        const encodedHeight =
+          rescueCandidate?.snapshot?.encodedHeight ??
+          Math.round(vehicleHeight * encodedScale);
+        this.lastCrop.plateWidth = Math.round(
+          (result.plateBox[2] - result.plateBox[0]) * encodedWidth,
+        );
+        this.lastCrop.plateHeight = Math.round(
+          (result.plateBox[3] - result.plateBox[1]) * encodedHeight,
+        );
       }
       this.completedTotal++;
       this.latencies.push(performance.now() - started);
       this.latencies = this.latencies.slice(-40);
       this.onChange();
+      if (plateConsensus(record.observations).plateText)
+        this.clearRescue(trackId);
     } catch (error) {
       this.refusedTotal++;
       // A refusal costs this track nothing: give the frame budget back so a
       // later, possibly better look can still be tried.
-      record.submitted--;
-      candidate.submitted = false;
+      if (chosen.rescue) {
+        const rescueCandidate = candidate as RescueCandidate;
+        rescueCandidate.failures++;
+        if (rescueCandidate.failures <= PLATE_LIMITS.rescueRetriesPerCrop) {
+          record.submitted--;
+          candidate.submitted = false;
+          this.schedulePump(remote);
+        }
+      } else {
+        record.submitted--;
+        candidate.submitted = false;
+      }
       if (
         error instanceof PlateUnavailableError &&
         error.message === "unavailable"
@@ -418,6 +727,7 @@ export class PlateCapture {
     } finally {
       record.inFlight = false;
       this.busy = false;
+      this.schedulePump(remote);
     }
   }
 }

@@ -104,7 +104,10 @@ export class SessionStore {
     if (
       old.plateStatus === plate.plateStatus &&
       (old.plateText ?? null) === (plate.plateText ?? null) &&
-      (old.plateSupportingFrames ?? 0) === (plate.plateSupportingFrames ?? 0)
+      (old.plateConfidence ?? null) === (plate.plateConfidence ?? null) &&
+      (old.plateSupportingFrames ?? 0) === (plate.plateSupportingFrames ?? 0) &&
+      (old.plateDetectorConfidence ?? null) ===
+        (plate.plateDetectorConfidence ?? null)
     )
       return false;
     const next: Report = {

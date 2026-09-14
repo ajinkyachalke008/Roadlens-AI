@@ -286,6 +286,88 @@ h2 {
   font-size: 12px;
   margin-top: 26px;
 }
+.status-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  background: #e4eedb;
+  border: 1px solid #bed2b1;
+  color: #244229;
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.8px;
+  padding: 6px 14px;
+  border-radius: 20px;
+  margin-bottom: 16px;
+}
+.live-pulse {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: #25a244;
+  box-shadow: 0 0 0 0 rgba(37, 162, 68, 0.7);
+  animation: pulse-ring 1.8s infinite cubic-bezier(0.66, 0, 0, 1);
+}
+@keyframes pulse-ring {
+  0% {
+    box-shadow: 0 0 0 0 rgba(37, 162, 68, 0.7);
+  }
+  70% {
+    box-shadow: 0 0 0 6px rgba(37, 162, 68, 0);
+  }
+  100% {
+    box-shadow: 0 0 0 0 rgba(37, 162, 68, 0);
+  }
+}
+.impact-pills {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-bottom: 36px;
+}
+.impact-pill {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  padding: 6px 12px;
+  border-radius: 6px;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--ink);
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.04);
+}
+.capabilities-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
+  gap: 16px;
+  margin-top: 36px;
+}
+.capability-card {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  padding: 22px 20px;
+  transition: transform 0.16s, border-color 0.16s;
+}
+.capability-card:hover {
+  border-color: #9bb093;
+  transform: translateY(-2px);
+}
+.capability-icon {
+  font-size: 26px;
+  margin-bottom: 12px;
+}
+.capability-card h3 {
+  font-size: 16px;
+  margin: 0 0 8px;
+  color: var(--ink);
+}
+.capability-card p {
+  font-size: 13px;
+  line-height: 1.5;
+  color: var(--muted);
+  margin: 0;
+}
+
 .stage {
   background: #111815;
   border-radius: 10px;

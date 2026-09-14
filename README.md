@@ -2,16 +2,35 @@
 
 <div align="center">
 
-[![Live Demo](https://img.shields.io/badge/Live_Demo-roadlens--ai--lime.vercel.app-00C7B7?style=for-the-badge&logo=vercel&logoColor=white)](https://roadlens-ai-lime.vercel.app)
-[![React](https://img.shields.io/badge/React_19-20232A?style=for-the-badge&logo=react&logoColor=61DAFB)](https://react.dev)
-[![TypeScript](https://img.shields.io/badge/TypeScript-007ACC?style=for-the-badge&logo=typescript&logoColor=white)](https://www.typescriptlang.org)
-[![Vite](https://img.shields.io/badge/Vite-646CFF?style=for-the-badge&logo=vite&logoColor=white)](https://vitejs.dev)
+# 🚦 Next-Gen In-Browser Traffic Intelligence
+
+**Transform any smartphone, laptop webcam, or CCTV footage into an autonomous edge-AI traffic camera — running 100% locally via WebAssembly and YOLO.**
+
+<br />
+
+[![Live Demo](https://img.shields.io/badge/🚀_Live_Production_App-roadlens--ai--lime.vercel.app-00C7B7?style=for-the-badge&logo=vercel&logoColor=white)](https://roadlens-ai-lime.vercel.app)
+[![GitHub Stars](https://img.shields.io/github/stars/ajinkyachalke008/Roadlens-AI?style=for-the-badge&color=ffd700)](https://github.com/ajinkyachalke008/Roadlens-AI)
+[![React 19](https://img.shields.io/badge/React_19-20232A?style=for-the-badge&logo=react&logoColor=61DAFB)](https://react.dev)
+[![TypeScript](https://img.shields.io/badge/TypeScript_5-007ACC?style=for-the-badge&logo=typescript&logoColor=white)](https://www.typescriptlang.org)
+[![Vite](https://img.shields.io/badge/Vite_8-646CFF?style=for-the-badge&logo=vite&logoColor=white)](https://vitejs.dev)
 [![ONNX Runtime Web](https://img.shields.io/badge/ONNX_Runtime_Web-005CED?style=for-the-badge&logo=onnx&logoColor=white)](https://onnxruntime.ai/)
 [![License: AGPL v3](https://img.shields.io/badge/License-AGPL_v3-blue.svg?style=for-the-badge)](LICENSE)
 
-**Privacy-first, in-browser traffic monitoring and vehicle analytics powered by WebAssembly and YOLO.**
+<br />
 
-[🌐 Open Live App](https://roadlens-ai-lime.vercel.app) · [💻 GitHub Repository](https://github.com/ajinkyachalke008/Roadlens-AI) · [📖 Documentation](docs/)
+[🌐 **Open Live App**](https://roadlens-ai-lime.vercel.app) · [📱 **Mobile Instructions**](#-mobile-quickstart) · [🛠️ **Local Setup**](#-local-development-quickstart) · [🏗️ **Architecture**](#-real-time-architecture-pipeline) · [📖 **Docs**](docs/)
+
+</div>
+
+---
+
+## ⚡ At a Glance: Key Impact Metrics
+
+<div align="center">
+
+| 🚀 0ms Cloud Latency | 🔒 100% Private (RAM Only) | 🚗 6 Detection Classes | 📉 $0 Server Inference Cost |
+| :---: | :---: | :---: | :---: |
+| Runs directly on-device via WebAssembly | Zero telemetry, cookies, or databases | Cars, Trucks, Buses, Bikes, Motos, People | No expensive cloud GPUs or subscriptions |
 
 </div>
 
@@ -19,62 +38,114 @@
 
 ## 📖 About RoadLens AI
 
-**RoadLens AI** transforms any standard web browser, smartphone camera, laptop webcam, or CCTV footage into an intelligent edge-computing traffic camera. 
+**RoadLens AI** is an open-source, client-side computer vision system engineered to make urban and neighborhood traffic observation accessible to everyone. 
 
-Unlike traditional cloud video solutions that stream sensitive camera feeds to remote third-party servers, RoadLens executes computer vision neural networks **directly inside the client's browser** via WebAssembly (WASM). No cloud GPU subscription, app store download, or account registration is required.
+Traditional CCTV and traffic analytics platforms require costly specialized hardware, proprietary RTSP cloud encoders, and expensive monthly cloud GPU bills. Moreover, streaming 24/7 public video across the internet presents major privacy risks.
 
-### 🌟 Why RoadLens AI?
-* **Edge-First Intelligence**: All detection and vehicle tracking runs client-side using **ONNX Runtime Web**.
-* **Zero Cloud Storage & 100% Ephemeral**: Raw video frames and detection statistics exist only in device RAM during the active session. Closing the browser tab securely clears all state.
-* **Mobile Ready**: Built to run seamlessly on mobile phones mounted on a tripod, dashboard, or window, utilizing the device's rear camera.
-
----
-
-## ✨ Key Features
-
-| Feature | Description |
-| :--- | :--- |
-| 🎯 **Multi-Class Vehicle Detection** | Accurately identifies **Cars, Trucks, Buses, Motorcycles, Bicycles, and Pedestrians** using a custom YOLO26n model. |
-| ⚡ **Speed & Trajectory Estimation** | Measures estimated vehicle speeds (km/h or mph) using camera planar calibration and a custom `time_aware_iou_v1` tracking algorithm. |
-| 📱 **Mobile Rear-Camera Mode** | Automatically engages the environment-facing lens on iOS Safari and Android Chrome with adaptive resolution scaling (416px / 320px). |
-| 📹 **CCTV & Video Replay Mode** | Upload pre-recorded dashcam, phone, or CCTV footage to analyze traffic metrics frame-by-frame offline. |
-| 📊 **Session Reports & Data Export** | Generates real-time traffic volume logs, speed candidate flags, and instant **CSV / JSON** data exports for spreadsheet analysis. |
-| 🔗 **Multi-Device Pairing (Optional)** | Pair a phone camera with a remote laptop viewer in real-time via an 8-character Crockford Base32 room code (`XXXX-XXXX`) through a lightweight relay. |
-| 🏎️ **Local GPU Worker (Optional)** | Connect an optional local computer with an NVIDIA GPU for high-resolution vehicle cropping and License Plate Recognition (ALPR/OCR). |
+**RoadLens AI flips this model completely:**
+1. **Edge-First Neural Network Execution**: Machine learning inference (YOLO26n FP32) executes locally inside your web browser via **ONNX Runtime Web** and single-thread WebAssembly (WASM).
+2. **True Ephemeral Privacy**: Neither video frames nor vehicle records are sent to external databases or stored on disk. All metrics exist exclusively in device RAM during the active session. Closing the browser clears everything immediately.
+3. **Turn Phones into Traffic Cameras**: Place an old smartphone on a window sill or tripod facing the street; the app automatically engages the rear traffic camera with adaptive resolution scaling (416px / 320px).
 
 ---
 
-## 🚀 Live Preview & Deployment
+## 🆚 Why RoadLens AI vs Traditional Cloud Solutions?
+
+| Dimension | ❌ Traditional Cloud CCTV AI | ⚡ RoadLens AI (Edge WASM) |
+| :--- | :--- | :--- |
+| **Server Cost** | $50 - $300 / camera / month | **$0 (100% Client-Side Compute)** |
+| **Privacy & Security** | Streams video feeds to remote servers | **100% Private — Video never leaves device RAM** |
+| **Inference Latency** | 300ms - 1500ms network round-trip | **Instant on-device real-time analysis** |
+| **Installation** | Heavy software, drivers, or proprietary NVRs | **Zero install — Open URL in any browser** |
+| **Device Compatibility** | Expensive dedicated IP cameras | **Any phone, tablet, laptop, or CCTV clip** |
+| **Data Retention** | Permanent video logs & risk of data leaks | **RAM-only session; wipe instantly on tab close** |
+
+---
+
+## 🏗️ Real-Time Architecture Pipeline
+
+```mermaid
+flowchart LR
+    A["📹 Video Source<br/>(Live Mobile Rear Cam / CCTV Video)"] --> B["⏱️ Adaptive Frame Clock<br/>(Backoff & Frequency Controller)"]
+    B --> C["🧠 In-Browser YOLO26n<br/>(ONNX Runtime Web WASM)"]
+    C --> D["📐 time_aware_iou_v1<br/>(Multi-Object Tracker)"]
+    D --> E["⚡ Planar Calibration Engine<br/>(Estimated Speed km/h & mph)"]
+    E --> F["🎨 Live HUD Overlay<br/>(Bounding Boxes & Speed Tags)"]
+    E --> G["📊 Ephemeral Session Report<br/>(Instant CSV / JSON Export)"]
+
+    subgraph Browser["💻 Client-Side Browser Boundary (100% In-RAM)"]
+      B
+      C
+      D
+      E
+      F
+      G
+    end
+```
+
+---
+
+## ✨ Core Features & Capabilities
+
+### 🚗 1. Multi-Class Road Object Detection
+* Detects and tracks 6 standard traffic classes in real-time:
+  * 🚙 **Cars**
+  * 🚚 **Trucks**
+  * 🚌 **Buses**
+  * 🏍️ **Motorcycles**
+  * 🚲 **Bicycles**
+  * 🚶 **Pedestrians**
+* Adaptive resolution automatically switches between **416×416** and **320×320** to ensure sustained performance without freezing browser threads.
+
+### ⚡ 2. Trajectory Tracking & Speed Estimation
+* Employs an optimized `time_aware_iou_v1` tracking algorithm inspired by ByteTrack.
+* Includes an interactive **2-Point Planar Calibration Tool**: click two points of known distance on the road (e.g. lane divider or lamp posts) to calibrate real-world distances.
+* Calculates velocity vectors and flags speeding candidates for traffic studies.
+
+### 📱 3. Mobile Rear-Camera Mode
+* Designed from the ground up to support smartphones as standalone camera nodes.
+* Auto-selects `facingMode: "environment"` (rear camera) with continuous autofocus.
+* Built-in keep-alive frame clock to maintain stable inference intervals on mobile chipsets.
+
+### 📹 4. CCTV & Video Replay Analysis
+* No street view available right now? Simply toggle to **Replay Video** mode.
+* Drop in any recorded MP4/WebM dashcam clip or security camera footage to run offline traffic counts and trajectory tracking.
+
+### 📊 5. Instant CSV / JSON Data Export
+* Generate real-time summary statistics: total vehicle counts, vehicle classification breakdown, peak observation windows, and candidate events.
+* One-click export to **CSV** or **JSON** for immediate spreadsheet analysis in Excel or Google Sheets.
+
+---
+
+## 🚀 Live Demo & Mobile Quickstart
 
 ### 🌐 Live Production Application
-Access the production application directly:
 👉 **[https://roadlens-ai-lime.vercel.app](https://roadlens-ai-lime.vercel.app)**
 
 ### 📱 Testing on Mobile:
-1. Open [https://roadlens-ai-lime.vercel.app](https://roadlens-ai-lime.vercel.app) on your phone.
-2. Grant camera permissions (served over secure HTTPS).
-3. Point your camera at a roadway, or select **Settings → Use replay video** to run inference on a sample clip!
+1. Open [https://roadlens-ai-lime.vercel.app](https://roadlens-ai-lime.vercel.app) in Safari (iOS) or Chrome (Android).
+2. Allow camera access (served over secure HTTPS).
+3. Mount the phone facing a road or street.
+4. Watch real-time bounding boxes, vehicle classifications, and speed calculations live on screen!
 
 ---
 
-## 🛠️ Tech Stack
+## 🛠️ Technology Stack
 
-* **Frontend Framework**: [React 19](https://react.dev) + [TypeScript](https://www.typescriptlang.org)
-* **Build Tool**: [Vite 8](https://vitejs.dev)
-* **Computer Vision & Inference**: [ONNX Runtime Web (WASM)](https://onnxruntime.ai/) running YOLO26n FP32
-* **Tracking Algorithm**: Custom `time_aware_iou_v1` tracker inspired by ByteTrack
-* **Backend Relay (Optional)**: [Node.js](https://nodejs.org) + [Express](https://expressjs.com) + [ws (WebSockets)](https://github.com/websockets/ws)
-* **Hosting**: [Vercel](https://vercel.com) (Static Frontend)
+* **Frontend**: [React 19](https://react.dev) · [TypeScript 5](https://www.typescriptlang.org)
+* **Build System**: [Vite 8](https://vitejs.dev)
+* **Neural Network Runtime**: [ONNX Runtime Web (WASM)](https://onnxruntime.ai/)
+* **Detection Model**: YOLO26n fixed FP32 ONNX profiles (packaged locally)
+* **Deployment**: [Vercel](https://vercel.com) (Static Edge Delivery)
+* **Optional Relay**: [Node.js](https://nodejs.org) + [Express](https://expressjs.com) + [ws](https://github.com/websockets/ws)
 
 ---
 
-## 💻 Local Development Setup
+## 💻 Local Development Quickstart
 
 ### Prerequisites
-* **Node.js**: >= 24.13.0 (or LTS 22.x/24.x)
-* **npm**: >= 11.0.0
-
-### Quickstart
+* **Node.js**: `v24.x` (or LTS `v22.x`)
+* **npm**: `>= 10.x`
 
 ```bash
 # 1. Clone the repository
@@ -84,49 +155,53 @@ cd Roadlens-AI
 # 2. Install dependencies
 npm ci
 
-# 3. Prepare and verify packaged ONNX model assets
+# 3. Verify and prepare packaged ONNX runtime and YOLO models
 npm run model:prepare
 
-# 4. Start local development server
+# 4. Launch development server
 npm run dev
 ```
 
-Open [http://127.0.0.1:5173](http://127.0.0.1:5173) in your browser.
+Visit [http://127.0.0.1:5173](http://127.0.0.1:5173) in your browser.
 
 ---
 
-## 🧪 Test & Validation Suite
+## 🧪 Testing & Validation Suite
 
 ```bash
-# Typecheck & linting
+# Typecheck TypeScript code
 npm run typecheck
+
+# Code formatting and linting
 npm run lint
 
-# Unit and contract tests
+# Run unit tests
 npm run test:unit
-npm run test:contracts
 
-# Production bundle validation
+# Production build and deployment validation
 npm run build
 npm run deploy:verify
 ```
 
 ---
 
-## 🔒 Privacy & Data Policy
+## 🛡️ Privacy & Ethical AI Principles
 
-* **Zero-Persistence Guarantee**: There is no database, cloud telemetry, or third-party tracking.
-* **Client-Authoritative**: Speed measurements, tracking calculations, and reports originate strictly in your device's memory.
-* **Export Ownership**: Only the operator can export data through explicit CSV/JSON download buttons.
+* **Zero Surveillance Storage**: RoadLens is not a surveillance database. No facial recognition, plate logging, or vehicle tracking history is stored in any cloud database.
+* **Human-in-the-Loop**: Speed estimates and event markers are intended as study aids and research observations, never automated legal citations.
+* **Open Source & Transparent**: The entire application source and model verification manifests are fully auditable under the [AGPL-3.0 License](LICENSE).
 
 ---
 
-## 📄 License
+## 👤 Author & Maintainer
 
-This project is licensed under the [GNU Affero General Public License v3.0 (AGPL-3.0)](LICENSE). Third-party runtime notices and attributions are detailed in [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md).
+Developed by **[Ajinkya Chalke](https://github.com/ajinkyachalke008)**  
+* GitHub: [@ajinkyachalke008](https://github.com/ajinkyachalke008)  
+* Project Repository: [Roadlens-AI](https://github.com/ajinkyachalke008/Roadlens-AI)  
+* Live App: [roadlens-ai-lime.vercel.app](https://roadlens-ai-lime.vercel.app)
 
 ---
 
 <div align="center">
-  <b>Built by <a href="https://github.com/ajinkyachalke008">Ajinkya Chalke</a></b> · RoadLens AI
+  <b>⭐ If you find this project useful, please consider giving it a star on GitHub! ⭐</b>
 </div>

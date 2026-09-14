@@ -121,7 +121,7 @@ export const PLATE_LIMITS = Object.freeze({
   /** Below this the consensus is reported as unreadable rather than guessed. */
   minConfidence: 0.55,
   minTextLength: 2,
-  maxTextLength: 10,
+  maxTextLength: 18,
   /** A transparent single-frame candidate is never the confirmed plate field. */
   candidateConfidence: 0.88,
   candidateDetectorConfidence: 0.5,

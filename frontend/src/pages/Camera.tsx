@@ -50,6 +50,7 @@ import {
   type ShowcaseQuality,
   type ShowcaseState,
 } from "../showcase/controller";
+import { scanIndianPlateFromCanvas } from "../plates/indianPlateScanner";
 export default function Camera() {
   const video = useRef<HTMLVideoElement>(null);
   const capture = useRef<CameraCapture | null>(null);
@@ -58,6 +59,11 @@ export default function Camera() {
   const store = useRef(new SessionStore()).current;
   const [revision, setRevision] = useState(0);
   const [frame, setFrame] = useState<DisplayFrame | null>(null);
+  const [scanningIndianPlate, setScanningIndianPlate] = useState(false);
+  const [indianPlateResults, setIndianPlateResults] = useState<
+    Map<number, { text: string; detail: string; confidence: number }>
+  >(new Map());
+  const [indianPlateToast, setIndianPlateToast] = useState<string | null>(null);
   const [status, setStatus] = useState("Idle");
   const [connection, setConnection] = useState("Local only");
   const [error, setError] = useState("");
@@ -1114,7 +1120,74 @@ export default function Camera() {
             setTimeout(() => setCapturedToast(false), 3000);
           }
         }}
+        onScanIndianPlate={async () => {
+          if (selectedTrackId === null) return;
+          const latest = capture.current?.latest;
+          if (!latest || !latest.canvas) {
+            setError("No active video frame available to scan.");
+            return;
+          }
+
+          setScanningIndianPlate(true);
+          setIndianPlateToast("🔍 Scanning vehicle for Indian number plate...");
+
+          try {
+            const selected = latest.result.tracks.find(
+              (t) => t.trackId === selectedTrackId,
+            );
+            const res = await scanIndianPlateFromCanvas(
+              latest.canvas,
+              selected?.bbox,
+            );
+
+            if (res.success && res.plate) {
+              setIndianPlateResults((prev) => {
+                const next = new Map(prev);
+                next.set(selectedTrackId, {
+                  text: res.plate!.formatted,
+                  detail: `${res.plate!.stateName} (${res.plate!.rtoLocation})`,
+                  confidence: res.confidence,
+                });
+                return next;
+              });
+
+              store.save(
+                latest.result,
+                latest.policy,
+                latest.jpeg,
+                "observation",
+                selectedTrackId,
+                undefined,
+                undefined,
+                {
+                  plateStatus: "read",
+                  plateText: res.plate.formatted,
+                  plateConfidence: res.confidence,
+                  plateSupportingFrames: 1,
+                  plateDetectorConfidence: res.confidence,
+                },
+              );
+
+              setIndianPlateToast(
+                `🇮🇳 Plate Detected: ${res.plate.formatted} · ${res.plate.stateName} (${res.plate.rtoLocation})`,
+              );
+            } else {
+              setIndianPlateToast(
+                res.error ?? "Could not clearly detect an Indian number plate in this crop.",
+              );
+            }
+          } catch {
+            setIndianPlateToast("Plate scanner encountered a temporary error.");
+          } finally {
+            setScanningIndianPlate(false);
+            setTimeout(() => setIndianPlateToast(null), 6000);
+          }
+        }}
+        isScanningIndianPlate={scanningIndianPlate}
+        indianPlateResult={selectedTrackId !== null ? (indianPlateResults.get(selectedTrackId)?.text ?? null) : null}
+        indianPlateDetail={selectedTrackId !== null ? (indianPlateResults.get(selectedTrackId)?.detail ?? null) : null}
       />
+
       <div className="controls">
         <div className="actions">
           <button
@@ -1169,6 +1242,11 @@ export default function Camera() {
       {capturedToast && (
         <div className="capture-toast-banner" role="status">
           <span>📸 <strong>Snapshot & Report Saved!</strong> Image and detection saved to Reports below.</span>
+        </div>
+      )}
+      {indianPlateToast && (
+        <div className="plate-toast-banner" role="status">
+          <span>{indianPlateToast}</span>
         </div>
       )}
       {!sharingAvailable() && (

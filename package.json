@@ -50,6 +50,7 @@
     "onnxruntime-web": "1.29.0",
     "react": "19.3.0",
     "react-dom": "19.3.0",
+    "tesseract.js": "^7.0.0",
     "ws": "8.21.3",
     "zod": "4.6.2"
   },

@@ -27,6 +27,10 @@ export interface SelectedVehicleProps {
   onAnalyzePlate: () => void;
   onClear: () => void;
   onSaveObservation?: () => void;
+  onScanIndianPlate?: () => void;
+  isScanningIndianPlate?: boolean;
+  indianPlateResult?: string | null;
+  indianPlateDetail?: string | null;
 }
 
 const MOTION: Record<string, string> = {
@@ -84,6 +88,10 @@ export function SelectedVehicle({
   onAnalyzePlate,
   onClear,
   onSaveObservation,
+  onScanIndianPlate,
+  isScanningIndianPlate = false,
+  indianPlateResult = null,
+  indianPlateDetail = null,
 }: SelectedVehicleProps) {
   if (!track && !lost) return null;
   const over =
@@ -159,11 +167,30 @@ export function SelectedVehicle({
               </dd>
             </div>
             <div>
-              <dt>Plate</dt>
-              <dd data-testid="selected-plate">{plateLine(plate)}</dd>
+              <dt>License Plate</dt>
+              <dd data-testid="selected-plate">
+                {indianPlateResult ? (
+                  <span className="indian-plate-badge">
+                    <strong>🇮🇳 {indianPlateResult}</strong>
+                    {indianPlateDetail && <small> · {indianPlateDetail}</small>}
+                  </span>
+                ) : (
+                  plateLine(plate)
+                )}
+              </dd>
             </div>
           </dl>
           <div className="actions">
+            {onScanIndianPlate && (
+              <button
+                className="indian-plate-btn"
+                onClick={onScanIndianPlate}
+                disabled={isScanningIndianPlate}
+                title="Scan Indian number plate from this vehicle in real-time"
+              >
+                {isScanningIndianPlate ? "🔍 Scanning Indian Plate..." : "🇮🇳 Scan Indian Number Plate"}
+              </button>
+            )}
             {onSaveObservation && (
               <button
                 className="primary"
@@ -173,17 +200,14 @@ export function SelectedVehicle({
                 📸 Capture Vehicle Report
               </button>
             )}
-            <button
-              onClick={onAnalyzePlate}
-              disabled={!plateAvailable || analyzing}
-              data-testid="analyze-plate"
-            >
-              {analyzing ? "Analyzing plate…" : "Analyze plate"}
-            </button>
-            {!plateAvailable && (
-              <small>
-                Plate reading needs the GPU worker&apos;s plate pipeline.
-              </small>
+            {plateAvailable && (
+              <button
+                onClick={onAnalyzePlate}
+                disabled={analyzing}
+                data-testid="analyze-plate"
+              >
+                {analyzing ? "Analyzing plate…" : "Analyze plate"}
+              </button>
             )}
           </div>
         </>

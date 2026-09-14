@@ -5,6 +5,7 @@ import { csvExport, jsonExport, download } from "../session/export";
 import { displaySpeed, type SpeedUnit } from "./speedUnits";
 import { Drawer } from "./Drawer";
 import { SHOWCASE_TRIGGER_REASON } from "../showcase/constants";
+import { parseIndianPlate } from "../../../shared/src/indianPlates";
 /**
  * One settled line of plate text for a report.
  *
@@ -14,14 +15,18 @@ import { SHOWCASE_TRIGGER_REASON } from "../showcase/constants";
  */
 export function plateLabel(report: Report) {
   switch (report.plateStatus) {
-    case "read":
-      return report.plateText
-        ? `${report.plateText}${
-            typeof report.plateConfidence === "number"
-              ? ` · ${(report.plateConfidence * 100).toFixed(0)}%`
-              : ""
-          }`
-        : "Unreadable";
+    case "read": {
+      if (!report.plateText) return "Unreadable";
+      const indian = parseIndianPlate(report.plateText);
+      const conf =
+        typeof report.plateConfidence === "number"
+          ? ` · ${(report.plateConfidence * 100).toFixed(0)}%`
+          : "";
+      if (indian?.isValid) {
+        return `🇮🇳 ${indian.formatted} · ${indian.stateName} (${indian.rtoLocation})${conf}`;
+      }
+      return `${report.plateText}${conf}`;
+    }
     case "pending":
       return report.plateCandidateText
         ? `Possible plate: ${report.plateCandidateText} · Unconfirmed · ${report.plateCandidateSupportingFrames ?? 1} frame`
@@ -231,7 +236,7 @@ export function Reports({
                         own; the full reading and its confidence are in the
                         detail view. */}
                     {r.plateStatus === "read" && r.plateText
-                      ? ` · ${r.plateText}`
+                      ? ` · 🇮🇳 ${r.plateText}`
                       : ""}
                   </small>
                 </span>

@@ -27,7 +27,7 @@ const base = { v: z.literal(1) };
  * separators that appear on real North American plates. Anything else is a
  * misread of a slogan, a frame or a bumper sticker rather than a plate.
  */
-export const PLATE_TEXT = /^[A-Z0-9][A-Z0-9 -]{0,8}[A-Z0-9]$/;
+export const PLATE_TEXT = /^[A-Z0-9][A-Z0-9 -]{0,16}[A-Z0-9]$/;
 export const PlateTextSchema = z
   .string()
   .min(PLATE_LIMITS.minTextLength)

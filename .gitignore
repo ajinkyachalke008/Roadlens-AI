@@ -76,3 +76,4 @@ tests/model/browser-results.json
 training/data/
 # Ultralytics writes here if a project directory is not set explicitly.
 runs/
+.vercel

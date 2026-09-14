@@ -26,6 +26,7 @@ export interface SelectedVehicleProps {
   speedUnit: SpeedUnit;
   onAnalyzePlate: () => void;
   onClear: () => void;
+  onSaveObservation?: () => void;
 }
 
 const MOTION: Record<string, string> = {
@@ -82,6 +83,7 @@ export function SelectedVehicle({
   speedUnit,
   onAnalyzePlate,
   onClear,
+  onSaveObservation,
 }: SelectedVehicleProps) {
   if (!track && !lost) return null;
   const over =
@@ -162,6 +164,15 @@ export function SelectedVehicle({
             </div>
           </dl>
           <div className="actions">
+            {onSaveObservation && (
+              <button
+                className="primary"
+                onClick={onSaveObservation}
+                title="Capture this vehicle into a report with photo"
+              >
+                📸 Capture Vehicle Report
+              </button>
+            )}
             <button
               onClick={onAnalyzePlate}
               disabled={!plateAvailable || analyzing}

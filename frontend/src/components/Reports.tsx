@@ -179,8 +179,10 @@ export function Reports({
       </div>
       {reports.length === 0 ? (
         <div className="empty-reports">
-          <strong>No reports yet</strong>
-          <p>Save an observation from an analyzed frame.</p>
+          <strong>No reports recorded yet</strong>
+          <p>
+            Tap <strong>📸 Capture Snapshot & Report</strong> above to save any analyzed frame with photo, or calibrate the road to record automated speed candidates.
+          </p>
         </div>
       ) : (
         <div className="report-list">

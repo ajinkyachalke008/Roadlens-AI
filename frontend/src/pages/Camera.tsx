@@ -97,8 +97,9 @@ export default function Camera() {
   ).current;
   const [validationRevision, setValidationRevision] = useState(0);
   const estimates = useRef(new Map<number, SpeedEstimate>());
-  const [evidence, setEvidence] = useState(false);
-  const evidenceRef = useRef(false);
+  const [evidence, setEvidence] = useState(true);
+  const evidenceRef = useRef(true);
+  const [capturedToast, setCapturedToast] = useState(false);
   const [profile, setProfile] = useState<416 | 320>(416);
   const [adaptiveNote, setAdaptiveNote] = useState("");
   const [inferenceMode, setInferenceMode] = useState("Browser AI");
@@ -501,8 +502,8 @@ export default function Camera() {
       setRoom(null);
       setStatus("Ended");
       statusRef.current = "Ended";
-      setEvidence(false);
-      evidenceRef.current = false;
+      setEvidence(true);
+      evidenceRef.current = true;
       setLimit("");
       setMargin("0");
       setRoad("");
@@ -1099,6 +1100,20 @@ export default function Camera() {
           setPlateRevision((value) => value + 1);
         }}
         onClear={() => select(null)}
+        onSaveObservation={() => {
+          const latest = capture.current?.latest;
+          if (latest) {
+            store.save(
+              latest.result,
+              latest.policy,
+              latest.jpeg,
+              "observation",
+              selectedTrackId ?? undefined,
+            );
+            setCapturedToast(true);
+            setTimeout(() => setCapturedToast(false), 3000);
+          }
+        }}
       />
       <div className="controls">
         <div className="actions">
@@ -1114,10 +1129,23 @@ export default function Camera() {
                 : "Start camera"}
           </button>
           <button
-            onClick={() => void share()}
-            disabled={!!room || sharing || !sharingAvailable()}
+            className="capture-btn"
+            onClick={() => {
+              const latest = capture.current?.latest;
+              if (latest) {
+                store.save(
+                  latest.result,
+                  latest.policy,
+                  latest.jpeg,
+                );
+                setCapturedToast(true);
+                setTimeout(() => setCapturedToast(false), 3000);
+              }
+            }}
+            disabled={!frame || !running}
+            title="Take a photo snapshot and save an observation report"
           >
-            {room ? "Sharing active" : sharing ? "Connecting…" : "Share camera"}
+            📸 {capturedToast ? "Captured! Check Reports ↓" : "Capture Snapshot & Report"}
           </button>
           <button onClick={() => setDrawer("calibration")} disabled={!frame}>
             Calibrate
@@ -1130,22 +1158,19 @@ export default function Camera() {
             Validate speed
           </button>
           <button
-            onClick={() => {
-              const latest = capture.current?.latest;
-              if (latest)
-                store.save(
-                  latest.result,
-                  latest.policy,
-                  evidence ? latest.jpeg : undefined,
-                );
-            }}
-            disabled={!frame || !running}
+            onClick={() => void share()}
+            disabled={!!room || sharing || !sharingAvailable()}
           >
-            Save observation
+            {room ? "Sharing active" : sharing ? "Connecting…" : "Share camera"}
           </button>
         </div>
         <button onClick={() => setDrawer("settings")}>Settings</button>
       </div>
+      {capturedToast && (
+        <div className="capture-toast-banner" role="status">
+          <span>📸 <strong>Snapshot & Report Saved!</strong> Image and detection saved to Reports below.</span>
+        </div>
+      )}
       {!sharingAvailable() && (
         <p className="footnote" role="status">
           Camera analysis is available. Sharing awaits a hosted relay.
@@ -1846,8 +1871,8 @@ export default function Camera() {
               setFrame(null);
               setStatus("Ended");
               statusRef.current = "Ended";
-              setEvidence(false);
-              evidenceRef.current = false;
+              setEvidence(true);
+              evidenceRef.current = true;
               setLimit("");
               setMargin("0");
               setRoad("");

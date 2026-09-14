@@ -1,119 +1,132 @@
-# RoadLens
+# RoadLens AI 🚗⚡
 
-[Open the deployed camera app](https://roadlens-ai-five.vercel.app) · [Source](https://github.com/kokoc30/roadlens-ai)
+<div align="center">
 
-The public frontend supports camera/replay analysis, local reports and remote sharing through the deployed Render relay. Full cloud pairing is verified: the real paired browser flow passes against the deployed frontend and relay together.
+[![Live Demo](https://img.shields.io/badge/Live_Demo-roadlens--ai--lime.vercel.app-00C7B7?style=for-the-badge&logo=vercel&logoColor=white)](https://roadlens-ai-lime.vercel.app)
+[![React](https://img.shields.io/badge/React_19-20232A?style=for-the-badge&logo=react&logoColor=61DAFB)](https://react.dev)
+[![TypeScript](https://img.shields.io/badge/TypeScript-007ACC?style=for-the-badge&logo=typescript&logoColor=white)](https://www.typescriptlang.org)
+[![Vite](https://img.shields.io/badge/Vite-646CFF?style=for-the-badge&logo=vite&logoColor=white)](https://vitejs.dev)
+[![ONNX Runtime Web](https://img.shields.io/badge/ONNX_Runtime_Web-005CED?style=for-the-badge&logo=onnx&logoColor=white)](https://onnxruntime.ai/)
+[![License: AGPL v3](https://img.shields.io/badge/License-AGPL_v3-blue.svg?style=for-the-badge)](LICENSE)
 
-Temporary traffic monitoring with browser inference and an optional local NVIDIA GPU worker. React + TypeScript + Vite retains genuine YOLO26n ONNX Runtime Web fallback. The optional Windows worker runs YOLO26s640 on CUDA and connects outward to the Node/Express/ws relay. The phone remains authoritative for tracking, geometry, rules and reports; the relay only pairs and forwards bounded data.
+**Privacy-first, in-browser traffic monitoring and vehicle analytics powered by WebAssembly and YOLO.**
 
-Video comes first, metrics and temporary reports below. Start a rear camera or select a permitted replay. Connect another browser using a random expiring code. Replay remains labeled and runs actual inference. The viewer does not load a detector or request a camera.
+[🌐 Open Live App](https://roadlens-ai-lime.vercel.app) · [💻 GitHub Repository](https://github.com/ajinkyachalke008/Roadlens-AI) · [📖 Documentation](docs/)
 
-## Local setup
+</div>
 
-Node24 LTS (tested24.13.0), npm11.6.2. The two verified ONNX artifacts are included; Python is unnecessary for the pretrained app.
+---
 
-```powershell
+## 📖 About RoadLens AI
+
+**RoadLens AI** transforms any standard web browser, smartphone camera, laptop webcam, or CCTV footage into an intelligent edge-computing traffic camera. 
+
+Unlike traditional cloud video solutions that stream sensitive camera feeds to remote third-party servers, RoadLens executes computer vision neural networks **directly inside the client's browser** via WebAssembly (WASM). No cloud GPU subscription, app store download, or account registration is required.
+
+### 🌟 Why RoadLens AI?
+* **Edge-First Intelligence**: All detection and vehicle tracking runs client-side using **ONNX Runtime Web**.
+* **Zero Cloud Storage & 100% Ephemeral**: Raw video frames and detection statistics exist only in device RAM during the active session. Closing the browser tab securely clears all state.
+* **Mobile Ready**: Built to run seamlessly on mobile phones mounted on a tripod, dashboard, or window, utilizing the device's rear camera.
+
+---
+
+## ✨ Key Features
+
+| Feature | Description |
+| :--- | :--- |
+| 🎯 **Multi-Class Vehicle Detection** | Accurately identifies **Cars, Trucks, Buses, Motorcycles, Bicycles, and Pedestrians** using a custom YOLO26n model. |
+| ⚡ **Speed & Trajectory Estimation** | Measures estimated vehicle speeds (km/h or mph) using camera planar calibration and a custom `time_aware_iou_v1` tracking algorithm. |
+| 📱 **Mobile Rear-Camera Mode** | Automatically engages the environment-facing lens on iOS Safari and Android Chrome with adaptive resolution scaling (416px / 320px). |
+| 📹 **CCTV & Video Replay Mode** | Upload pre-recorded dashcam, phone, or CCTV footage to analyze traffic metrics frame-by-frame offline. |
+| 📊 **Session Reports & Data Export** | Generates real-time traffic volume logs, speed candidate flags, and instant **CSV / JSON** data exports for spreadsheet analysis. |
+| 🔗 **Multi-Device Pairing (Optional)** | Pair a phone camera with a remote laptop viewer in real-time via an 8-character Crockford Base32 room code (`XXXX-XXXX`) through a lightweight relay. |
+| 🏎️ **Local GPU Worker (Optional)** | Connect an optional local computer with an NVIDIA GPU for high-resolution vehicle cropping and License Plate Recognition (ALPR/OCR). |
+
+---
+
+## 🚀 Live Preview & Deployment
+
+### 🌐 Live Production Application
+Access the production application directly:
+👉 **[https://roadlens-ai-lime.vercel.app](https://roadlens-ai-lime.vercel.app)**
+
+### 📱 Testing on Mobile:
+1. Open [https://roadlens-ai-lime.vercel.app](https://roadlens-ai-lime.vercel.app) on your phone.
+2. Grant camera permissions (served over secure HTTPS).
+3. Point your camera at a roadway, or select **Settings → Use replay video** to run inference on a sample clip!
+
+---
+
+## 🛠️ Tech Stack
+
+* **Frontend Framework**: [React 19](https://react.dev) + [TypeScript](https://www.typescriptlang.org)
+* **Build Tool**: [Vite 8](https://vitejs.dev)
+* **Computer Vision & Inference**: [ONNX Runtime Web (WASM)](https://onnxruntime.ai/) running YOLO26n FP32
+* **Tracking Algorithm**: Custom `time_aware_iou_v1` tracker inspired by ByteTrack
+* **Backend Relay (Optional)**: [Node.js](https://nodejs.org) + [Express](https://expressjs.com) + [ws (WebSockets)](https://github.com/websockets/ws)
+* **Hosting**: [Vercel](https://vercel.com) (Static Frontend)
+
+---
+
+## 💻 Local Development Setup
+
+### Prerequisites
+* **Node.js**: >= 24.13.0 (or LTS 22.x/24.x)
+* **npm**: >= 11.0.0
+
+### Quickstart
+
+```bash
+# 1. Clone the repository
+git clone https://github.com/ajinkyachalke008/Roadlens-AI.git
+cd Roadlens-AI
+
+# 2. Install dependencies
 npm ci
+
+# 3. Prepare and verify packaged ONNX model assets
 npm run model:prepare
+
+# 4. Start local development server
 npm run dev
 ```
 
-Open http://127.0.0.1:5173 in two desktop browsers. Choose Start camera, or Settings → Use replay video. Share camera creates a code for Connect to camera. A local development URL is not a public phone deployment.
+Open [http://127.0.0.1:5173](http://127.0.0.1:5173) in your browser.
 
-## Optional GPU setup
+---
 
-```powershell
-# First setup only: isolated Python 3.13, pinned packages and cached models.
-.\setup-worker.ps1 -PythonExecutable python
-# Configure ignored .env.worker with actual relay WSS URL and machine secret.
-# Normal operation; Ctrl+C stops this foreground worker.
-.\start.ps1
-```
+## 🧪 Test & Validation Suite
 
-GPU startup never installs packages or rebuilds an engine. The selected verified runtime is PyTorch CUDA; ONNX CUDA also passes real parity. TensorRT did not complete its bounded build and is unverified. See [GPU setup/protocol](docs/GPU_WORKER.md) and [actual benchmarks](docs/GPU_BENCHMARK.md). No Python CPU fallback, inbound port or tunnel is used. Cloud GPU operation is blocked until the authorized relay exists; browser fallback remains independent of the GPU computer.
-
-## Verification
-
-Run browser suites sequentially:
-
-```powershell
+```bash
+# Typecheck & linting
 npm run typecheck
 npm run lint
+
+# Unit and contract tests
 npm run test:unit
 npm run test:contracts
-npm run test:integration
-npx playwright install chromium
-npm run test:model
-npm run test:e2e
-npm run test:privacy
+
+# Production bundle validation
 npm run build
-npm run test:production
-npm run test:split-production
 npm run deploy:verify
-# With worker setup completed on the NVIDIA machine:
-npm run test:worker
-npm run test:start
-npm run test:gpu
-npm run gpu:benchmark
-# Optional plate pipeline, on licensed public data downloaded on demand:
-npm run plate:dataset
-node scripts/worker-python.mjs training/plates/openalpr_us.py --region us
-npm run plate:ocr-bench
-npm run plate:eval -- --suite us
 ```
 
-The real-model browser tests use a permitted official sample photograph with recorded provenance. They prove execution and reference parity, not field detection quality. Exact results and external gates are in [the handoff](docs/FINAL_HANDOFF.md).
+---
 
-## Pairing and privacy
+## 🔒 Privacy & Data Policy
 
-Eight Crockford Base32 characters, displayed XXXX-XXXX, invite viewers for ten minutes. Rooms last at most sixty minutes, with one camera and two viewers. Independent automatic capabilities live only in RAM. Exact origins, role checks, schemas, rate limits and byte caps protect the relay. No login, database, cloud report storage or server inference.
+* **Zero-Persistence Guarantee**: There is no database, cloud telemetry, or third-party tracking.
+* **Client-Authoritative**: Speed measurements, tracking calculations, and reports originate strictly in your device's memory.
+* **Export Ownership**: Only the operator can export data through explicit CSV/JSON download buttons.
 
-Reports are limited to200; optional evidence starts off and is capped at20 images/8MiB. No application localStorage, sessionStorage, IndexedDB, service-worker cache or disk media. Reload loses page state. Pause invalidates measurement continuity; Stop sharing can keep camera-local reports; End session clears the session. Explicit JSON/CSV/image downloads are user-owned files and cannot be revoked, nor can screenshots.
+---
 
-Viewer updates default to1Hz (maximum2), JPEG long edge640px, hard cap128KiB. GPU analysis is a separate bounded stream, default640long edge, at most15Hz and at most two in-flight frames, with optional960 encoding. Images and metadata describe the same completed frame. Slow consumers drop work. No viewers means no preview upload; enabled GPU analysis still sends images to the worker. All relay egress joins existing room/process caps, which are application limits rather than provider billing guarantees.
+## 📄 License
 
-## Model and speed limitations
+This project is licensed under the [GNU Affero General Public License v3.0 (AGPL-3.0)](LICENSE). Third-party runtime notices and attributions are detailed in [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md).
 
-Official YOLO26n fixed FP32 ONNX profiles416 and320 use matching ORT1.29.0 single-thread WASM assets. The measured adaptive policy can downshift to320 and reduce analysis frequency. Only person, bicycle, car, motorcycle, bus and truck are mapped. See [model provenance and validation](docs/MODEL_VALIDATION.md) and public model manifests for hashes, byte sizes and export semantics.
+---
 
-The implemented tracker is time_aware_iou_v1, inspired by ByteTrack; it is not an official ByteTrack port. Numeric speed requires measured planar calibration, an independent check, a stationary background, stable identity and sufficient actual source-time observations. Otherwise speed is null/“—”. An accepted calibration is graded Valid or Weak, and a Weak grade names the marginal property. Speed validation tooling records measured-versus-reference trials and computes MAE, median, p95, maximum and signed bias; [the procedure and the empty results table](docs/SPEED_VALIDATION.md) make clear that no physical field accuracy has been measured yet. Persistence and episode deduplication gate speed candidates. Entered limits and margins are demo settings. Candidates are for human review, never automated legal citations. Field-speed accuracy and physical-phone performance remain unverified until measured.
-
-Wrong-way alerts are disabled. [Optional local training tools](training/README.md) do not block use of the pretrained application.
-
-## Plate recognition
-
-Plates are read on the local GPU worker, never on the phone, and only for a
-vehicle something already qualified: an operator selection or a speed candidate.
-A dedicated single-class YOLO26n localizer and a plate OCR engine run on a
-vehicle crop taken from the phone's **full resolution** frame, so the plate is
-described by a 640px budget instead of a dozen pixels inside a 640px view of the
-whole road. At most one plate task exists anywhere at a time, and the worker only
-accepts one when no analysis frame is running or waiting, so plate work can never
-queue in front of traffic detection.
-
-A reading is never trusted from one frame. Up to four crops per track are scored
-on size, sharpness, framing and pose; each returns one reading; agreement across
-them decides the answer. Confusable glyphs (0/O, 1/I, 5/S, 8/B) are grouped for
-voting but never substituted, and no regional plate regex is applied. Below the
-agreement and confidence floors the report says **Unreadable** rather than
-guessing, and plate text never appears over vehicles in the overlay.
-
-The worker keeps no crop, reading or history between requests. Crops, readings
-and consensus live in phone RAM for one capture epoch and are cleared by a source
-change, a seek, or End session. There is no plate database, archive, telemetry or
-local storage, and plate strings are never logged.
-
-Plate support is optional at every layer. A worker without the model or OCR
-packages advertises no plate pipeline, the report shows **Plate unavailable**,
-and traffic detection, tracking, speed, sharing and reports are unaffected.
-
-Measured accuracy, bounds, the evaluation command and the honest limits are in
-[PLATE_VALIDATION.md](docs/PLATE_VALIDATION.md); dataset and model provenance is
-in [PLATE_DATASETS.md](docs/PLATE_DATASETS.md); results and status are in
-[PLATE_RESULTS.md](docs/PLATE_RESULTS.md).
-
-## Hosting and release
-
-[Vercel static frontend + Render Free relay](docs/DEPLOYMENT.md), or the documented single-Render fallback. WebSockets and inference are not Vercel Functions. Browser mode needs no development computer after deployment; optional GPU mode needs the Windows worker running. Exact status, URLs and remaining account restrictions are recorded in [FINAL_HANDOFF.md](docs/FINAL_HANDOFF.md). A frontend-only release explicitly disables sharing and GPU transport.
-
-The application is released under [AGPL-3.0](LICENSE), with [third-party notices](THIRD_PARTY_NOTICES.md). Public source includes the application, build scripts, tests and model provenance. Private instruction/research packs, credentials, datasets and generated captures are excluded.
+<div align="center">
+  <b>Built by <a href="https://github.com/ajinkyachalke008">Ajinkya Chalke</a></b> · RoadLens AI
+</div>

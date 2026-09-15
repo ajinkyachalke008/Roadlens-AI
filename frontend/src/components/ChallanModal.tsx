@@ -155,6 +155,26 @@ export function ChallanModal({
             </div>
           </div>
 
+          {/* Forensic GPS Coordinates Strip */}
+          {challan.gpsCoordinates && (
+            <div className="challan-gps-strip" data-testid="challan-gps-banner">
+              <span className="gps-icon">📍</span>
+              <div className="gps-details">
+                <span className="gps-label">{isHindi ? "न्यायिक जीपीएस निर्देशांक:" : "Forensic GPS Coordinates:"}</span>
+                <strong className="gps-coords">{challan.gpsCoordinates.formattedDms} (±{challan.gpsCoordinates.accuracyM}m)</strong>
+              </div>
+              <a
+                href={challan.gpsCoordinates.mapUrl}
+                target="_blank"
+                rel="noreferrer"
+                className="gps-map-link"
+                title="Verify location on Google Maps"
+              >
+                {isHindi ? "मानचित्र पर स्थान देखें ↗" : "Verify on Map ↗"}
+              </a>
+            </div>
+          )}
+
           {/* Vehicle and Registration Details */}
           <div className="challan-section">
             <h3 className="section-title">
@@ -182,6 +202,23 @@ export function ChallanModal({
               </div>
             </div>
           </div>
+
+          {/* Two-Wheeler Safety Violation Alert (if applicable) */}
+          {challan.twoWheelerViolations && challan.twoWheelerViolations.length > 0 && (
+            <div className="two-wheeler-alert-banner" data-testid="two-wheeler-alert">
+              <span className="alert-icon">🏍️</span>
+              <div className="alert-body">
+                <strong>{isHindi ? "दोपहिया वाहन सुरक्षा उल्लंघन (एमवी एक्ट धारा 194C / 194D)" : "Two-Wheeler Safety Violations Detected (MV Act Sec 194C / 194D)"}</strong>
+                <div className="two-wheeler-tags">
+                  {challan.twoWheelerViolations.map((v) => (
+                    <span className="two-wheeler-pill" key={v.type}>
+                      {isHindi ? v.titleHi : v.titleEn} (₹{v.penaltyInr})
+                    </span>
+                  ))}
+                </div>
+              </div>
+            </div>
+          )}
 
           {/* Violation and Measurement Facts */}
           <div className="challan-section">

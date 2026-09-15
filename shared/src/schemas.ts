@@ -402,6 +402,7 @@ export const PacketHeaderSchema = z.discriminatedUnion("type", [
 export type Detection = z.infer<typeof DetectionSchema>;
 export type FrameResult = z.infer<typeof FrameSchema>;
 export type TrackView = z.infer<typeof TrackSchema>;
+export type Track = TrackView;
 export type Report = z.infer<typeof ReportSchema>;
 export type CameraPolicy = z.infer<typeof PolicySchema>;
 export type Control = z.infer<typeof ControlSchema>;

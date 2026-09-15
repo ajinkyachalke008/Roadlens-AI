@@ -2190,3 +2190,145 @@ hr {
   font-style: italic;
 }
 
+/* Stage GPS HUD Badge */
+.stage-gps-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  background: rgba(14, 165, 233, 0.14);
+  border: 1px solid rgba(56, 189, 248, 0.35);
+  color: #38bdf8;
+  padding: 2px 10px;
+  border-radius: 9999px;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.2px;
+  box-shadow: 0 1px 4px rgba(0, 0, 0, 0.25);
+}
+
+/* e-Challan Forensic GPS Strip */
+.challan-gps-strip {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  background: #f0fdf4;
+  border: 1px solid #bbf7d0;
+  border-left: 4px solid #16a34a;
+  border-radius: 6px;
+  padding: 8px 14px;
+  margin-bottom: 20px;
+  font-size: 12px;
+}
+
+.challan-gps-strip .gps-icon {
+  font-size: 16px;
+}
+
+.challan-gps-strip .gps-details {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex: 1;
+  margin-left: 8px;
+  flex-wrap: wrap;
+}
+
+.challan-gps-strip .gps-label {
+  color: #166534;
+  font-weight: 600;
+}
+
+.challan-gps-strip .gps-coords {
+  color: #14532d;
+  font-family: ui-monospace, SFMono-Regular, monospace;
+  font-weight: 700;
+}
+
+.challan-gps-strip .gps-map-link {
+  color: #0284c7;
+  font-weight: 700;
+  text-decoration: none;
+  border: 1px solid #bae6fd;
+  background: #ffffff;
+  padding: 4px 12px;
+  border-radius: 5px;
+  font-size: 11px;
+  transition: all 0.15s ease;
+  white-space: nowrap;
+}
+
+.challan-gps-strip .gps-map-link:hover {
+  background: #e0f2fe;
+  color: #0369a1;
+  border-color: #7dd3fc;
+}
+
+/* Two-Wheeler Safety Violations Alert Banner in Challan */
+.two-wheeler-alert-banner {
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+  background: #fff1f2;
+  border: 1px solid #fecdd3;
+  border-left: 4px solid #e11d48;
+  border-radius: 6px;
+  padding: 10px 14px;
+  margin-bottom: 20px;
+}
+
+.two-wheeler-alert-banner .alert-icon {
+  font-size: 22px;
+  line-height: 1;
+}
+
+.two-wheeler-alert-banner .alert-body {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.two-wheeler-alert-banner strong {
+  color: #9f1239;
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.two-wheeler-tags {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.two-wheeler-pill {
+  background: #be123c;
+  color: #ffffff;
+  padding: 3px 9px;
+  border-radius: 4px;
+  font-size: 11px;
+  font-weight: 700;
+}
+
+/* Two-Wheeler Inspection Badges in SelectedVehicle Card */
+.twowheeler-violation-badge {
+  display: inline-block;
+  background: rgba(225, 29, 72, 0.16);
+  border: 1px solid rgba(244, 63, 94, 0.45);
+  color: #fb7185;
+  padding: 3px 8px;
+  border-radius: 4px;
+  font-size: 11px;
+  font-weight: 600;
+}
+
+.twowheeler-compliant-badge {
+  display: inline-block;
+  background: rgba(16, 185, 129, 0.15);
+  border: 1px solid rgba(16, 185, 129, 0.4);
+  color: #34d399;
+  padding: 3px 8px;
+  border-radius: 4px;
+  font-size: 11px;
+  font-weight: 600;
+}
+

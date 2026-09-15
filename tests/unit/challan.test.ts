@@ -131,4 +131,81 @@ describe("e-Challan Generator & Indian Motor Vehicles Act Fines", () => {
     expect(notice.plateCutoutUrl).toBe("blob:http://localhost/plate1");
     expect(notice.paymentStatus).toBe("PENDING");
   });
+
+  it("calculates Section 194C (Triple Riding) and Section 194D (No Helmet) violations for two-wheelers", () => {
+    // Non-speeding motorcycle (speed 35 km/h on 40 km/h road) with triple riding & no helmet
+    const result = calculateIndianTrafficFine("motorcycle", 9.72, 11.11, {
+      isTripleRiding: true,
+      hasNoHelmet: true,
+    });
+
+    expect(result.isViolation).toBe(true);
+    expect(result.excessKmh).toBe(0);
+    // 1000 (triple riding) + 1000 (no helmet) = 2000
+    expect(result.penaltyInr).toBe(2000);
+    expect(result.items).toHaveLength(2);
+    expect(result.items.some((item) => item.code === "MV-194C")).toBe(true);
+    expect(result.items.some((item) => item.code === "MV-194D")).toBe(true);
+  });
+
+  it("embeds forensic GPS coordinates and two-wheeler violation flags into e-Challan", () => {
+    const bikeReport: Report = {
+      reportId: "bike-rep-001",
+      revision: 1,
+      sourceId: "source-1",
+      captureEpoch: "epoch-1",
+      frameId: "f-200",
+      trackId: 19,
+      sourceMode: "live_camera",
+      sourceTimeMs: 14000,
+      capturedAtIso: "2026-09-15T09:20:00.000Z",
+      kind: "observation",
+      className: "motorcycle",
+      score: 0.94,
+      speedMps: 16.66, // 60 km/h on 40 km/h limit (excess +20 km/h -> 1000)
+      policy: {
+        version: "p-1",
+        roadLabel: "NH-48",
+        speedLimitMps: 11.11,
+        demoMarginMps: 1.38,
+        limitSource: "operator_entered_demo",
+      },
+      validityReasons: [],
+      evidenceSummary: { trajectory: [], residualM: null, coverageMs: null },
+      modelId: "yolo26n",
+      modelSha256: "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
+      detectorProfile: "profile-1",
+      trackerVersion: "track-1",
+      plateText: "MH 14 CC 8899",
+      plateStatus: "read",
+    } as unknown as Report;
+
+    const notice = createEChallanFromReport(
+      bikeReport,
+      undefined,
+      "Mumbai - Pune Expressway Corridor",
+      {
+        latitude: 18.7562,
+        longitude: 73.4078,
+        accuracyM: 3,
+        formattedDms: `18°45'22.3"N 73°24'28.1"E`,
+        mapUrl: "https://www.google.com/maps?q=18.756200,73.407800",
+        landmark: "Khalapur Toll Plaza · NH-48",
+      },
+      {
+        isTripleRiding: true,
+        hasNoHelmet: true,
+      },
+    );
+
+    // Over-speeding (1000) + Triple-riding (1000) + No-helmet (1000) = 3000
+    expect(notice.totalPenaltyInr).toBe(3000);
+    expect(notice.fineItems).toHaveLength(3);
+    expect(notice.gpsCoordinates).toBeDefined();
+    expect(notice.gpsCoordinates?.formattedDms).toContain("18°45'");
+    expect(notice.gpsCoordinates?.accuracyM).toBe(3);
+    expect(notice.gpsCoordinates?.mapUrl).toContain("maps");
+    expect(notice.twoWheelerViolations).toHaveLength(2);
+    expect(notice.locationName).toBe("Khalapur Toll Plaza · NH-48");
+  });
 });

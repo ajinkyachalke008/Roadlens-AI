@@ -57,6 +57,14 @@ import {
   type AutoScanTriggerMode,
 } from "../plates/autoScanner";
 import { playPlateChime } from "../plates/audioChime";
+import {
+  getCurrentGeoLocation,
+  type GeotaggedLocation,
+} from "../geo/geolocationService";
+import {
+  analyzeTwoWheelerViolations,
+  type TwoWheelerAnalysisResult,
+} from "../violations/twoWheelerAnalyzer";
 export default function Camera() {
   const video = useRef<HTMLVideoElement>(null);
   const capture = useRef<CameraCapture | null>(null);
@@ -77,6 +85,18 @@ export default function Camera() {
     Map<number, { text: string; detail: string; confidence: number }>
   >(new Map());
   const [indianPlateToast, setIndianPlateToast] = useState<string | null>(null);
+  const [gpsLocation, setGpsLocation] = useState<GeotaggedLocation | null>(null);
+  const twoWheelerResultsRef = useRef<Map<number, TwoWheelerAnalysisResult>>(new Map());
+  const twoWheelerFlagsMap = useRef<Map<number, { isTripleRiding?: boolean; hasNoHelmet?: boolean }>>(new Map());
+  const [twoWheelerTags, setTwoWheelerTags] = useState<Map<number, string>>(new Map());
+
+  useEffect(() => {
+    getCurrentGeoLocation().then((loc) => {
+      setGpsLocation(loc);
+    });
+    (window as unknown as { __ROADLENS_STORE__?: SessionStore }).__ROADLENS_STORE__ = store;
+    (window as unknown as { __ROADLENS_TWOWHEELER_FLAGS__?: Map<number, { isTripleRiding?: boolean; hasNoHelmet?: boolean }> }).__ROADLENS_TWOWHEELER_FLAGS__ = twoWheelerFlagsMap.current;
+  }, [store]);
   const [status, setStatus] = useState("Idle");
   const [connection, setConnection] = useState("Local only");
   const [error, setError] = useState("");
@@ -435,6 +455,37 @@ export default function Camera() {
             : "Handheld / uncalibrated · detection only",
       );
       handleShowcaseFrame(completed);
+      // Analyze two-wheeler violations on active tracks
+      let tagsChanged = false;
+      const currentTags = new Map(twoWheelerTags);
+      for (const track of completed.result.tracks) {
+        if (track.className === "motorcycle") {
+          const res = analyzeTwoWheelerViolations(track, completed.result.tracks);
+          twoWheelerResultsRef.current.set(track.trackId, res);
+          twoWheelerFlagsMap.current.set(track.trackId, {
+            isTripleRiding: res.isTripleRiding,
+            hasNoHelmet: res.hasNoHelmetViolation,
+          });
+
+          let tag: string | null = null;
+          if (res.isTripleRiding && res.hasNoHelmetViolation) {
+            tag = "🚨 TRIPLE + NO HELMET";
+          } else if (res.isTripleRiding) {
+            tag = "🚨 TRIPLE RIDING";
+          } else if (res.hasNoHelmetViolation) {
+            tag = "🪖 NO HELMET";
+          }
+
+          if (tag !== currentTags.get(track.trackId)) {
+            if (tag) currentTags.set(track.trackId, tag);
+            else currentTags.delete(track.trackId);
+            tagsChanged = true;
+          }
+        }
+      }
+      if (tagsChanged) {
+        setTwoWheelerTags(currentTags);
+      }
       plates.observe(completed.result, completed.canvas, c.remote);
       flushPlates();
       if (autoScanner.enabled) {
@@ -1170,6 +1221,8 @@ export default function Camera() {
         plateBox={selectedPlate?.plateBox ?? null}
         speedLimitMps={capture.current?.policy.speedLimitMps ?? null}
         indianPlates={new Map(Array.from(indianPlateResults.entries()).map(([id, r]) => [id, r.text]))}
+        twoWheelerViolations={twoWheelerTags}
+        gpsLocation={gpsLocation}
       />
       <SelectedVehicle
         track={selectedTrack}
@@ -1179,6 +1232,7 @@ export default function Camera() {
         mode={mode}
         policy={capture.current?.policy ?? newPolicy()}
         speedUnit={speedUnit}
+        twoWheelerResult={selectedTrackId !== null ? (twoWheelerResultsRef.current.get(selectedTrackId) ?? null) : null}
         onAnalyzePlate={() => {
           if (selectedTrackId === null) return;
           if (!plates.request(selectedTrackId))
@@ -1473,6 +1527,8 @@ export default function Camera() {
         revision={revision + plateRevision}
         speedUnit={speedUnit}
         onReview={(r: Report, s) => store.review(r.reportId, r.revision, s)}
+        gpsLocation={gpsLocation}
+        twoWheelerFlagsMap={twoWheelerFlagsMap.current}
       />
       <div className="session-footer">
         <button onClick={() => setDrawer("end")}>End session</button>
@@ -2110,6 +2166,9 @@ export default function Camera() {
               plateReports.clear();
               autoScanner.reset();
               setIndianPlateResults(new Map());
+              twoWheelerResultsRef.current.clear();
+              twoWheelerFlagsMap.current.clear();
+              setTwoWheelerTags(new Map());
               setAutoScanCount(0);
               validation.current.clear();
               estimates.current = new Map();

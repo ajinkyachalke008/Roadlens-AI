@@ -67,9 +67,11 @@ export const overlayLabel = (
   showcase = false,
   showcaseAlert = true,
   indianPlate?: string | null,
+  twoWheelerViolation?: string | null,
 ) =>
   `${showcase ? (showcaseAlert ? "TRAFFIC ALERT · " : "ACQUIRING · ") : ""}${className.toUpperCase()} · ID ${trackId}` +
   (indianPlate ? ` · 🇮🇳 ${indianPlate}` : "") +
+  (twoWheelerViolation ? ` · ${twoWheelerViolation}` : "") +
   (speedMps !== null ? ` · ${displaySpeed(speedMps, speedUnit)}` : "") +
   (speedMps !== null && overBy !== null && overBy > 0
     ? ` · +${displaySpeed(overBy, speedUnit)}`
@@ -95,6 +97,7 @@ function drawBoxes(
   plateBox: readonly [number, number, number, number] | null = null,
   overBy: (box: OverlayDrawBox) => number | null = () => null,
   indianPlates?: Map<number, string> | null,
+  twoWheelerViolations?: Map<number, string> | null,
 ) {
   ctx.save();
   // Detections belong to the video content, never to the letterbox bars.
@@ -123,6 +126,7 @@ function drawBoxes(
     ctx.strokeRect(x, y, width, height);
     ctx.lineWidth = Math.max(1.5, rect.width / 450);
     const plateText = indianPlates?.get(box.trackId) ?? null;
+    const twoWheelerTag = twoWheelerViolations?.get(box.trackId) ?? null;
     const label = overlayLabel(
       box.className,
       box.trackId,
@@ -132,6 +136,7 @@ function drawBoxes(
       showcase,
       showcaseAlert,
       plateText,
+      twoWheelerTag,
     );
     const labelHeight = Math.max(20, rect.width / 40);
     const textWidth = ctx.measureText(label).width + 12;
@@ -194,6 +199,8 @@ export function Stage({
   plateBox = null,
   speedLimitMps = null,
   indianPlates = null,
+  twoWheelerViolations = null,
+  gpsLocation = null,
 }: {
   frame: DisplayFrame | null;
   status: string;
@@ -213,6 +220,12 @@ export function Stage({
   plateBox?: readonly [number, number, number, number] | null;
   speedLimitMps?: number | null;
   indianPlates?: Map<number, string> | null;
+  twoWheelerViolations?: Map<number, string> | null;
+  gpsLocation?: {
+    formattedDms: string;
+    coordinates: { accuracyM: number };
+    landmark?: string;
+  } | null;
 }) {
   const canvas = useRef<HTMLCanvasElement>(null);
   const view = useRef<HTMLDivElement>(null);
@@ -231,6 +244,8 @@ export function Stage({
   limit.current = speedLimitMps;
   const platesMap = useRef(indianPlates);
   platesMap.current = indianPlates;
+  const twoWheelersMap = useRef(twoWheelerViolations);
+  twoWheelersMap.current = twoWheelerViolations;
   const drawn = useRef<OverlayDrawBox[]>([]);
   const contentRef = useRef<ContentRect | null>(null);
   // Analysed results reach the render loop without re-rendering the page.
@@ -311,6 +326,7 @@ export function Stage({
             ? box.speedMps - limit.current
             : null,
         platesMap.current,
+        twoWheelersMap.current,
       );
       if (telemetry?.current)
         Object.assign(telemetry.current, {
@@ -356,6 +372,7 @@ export function Stage({
       null,
       () => null,
       platesMap.current,
+      twoWheelersMap.current,
     );
   }, [frame, speedUnit, live]);
   return (
@@ -367,6 +384,15 @@ export function Stage({
             ? "REPLAY"
             : "ANALYZED VIEW"}
         </span>
+        {gpsLocation && (
+          <span
+            className="stage-gps-badge"
+            data-testid="stage-gps-badge"
+            title={gpsLocation.landmark}
+          >
+            📍 {gpsLocation.formattedDms} (±{gpsLocation.coordinates.accuracyM}m)
+          </span>
+        )}
         <span>{status}</span>
       </div>
       <div className="stage-view" ref={view} data-live="false">

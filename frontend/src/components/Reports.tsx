@@ -8,6 +8,7 @@ import { SHOWCASE_TRIGGER_REASON } from "../showcase/constants";
 import { parseIndianPlate } from "../../../shared/src/indianPlates";
 import { ChallanModal } from "./ChallanModal";
 import { createEChallanFromReport, type EChallanNotice } from "../challan/challanGenerator";
+import { getCurrentGeoLocation, type GeotaggedLocation } from "../geo/geolocationService";
 /**
  * One settled line of plate text for a report.
  *
@@ -94,6 +95,8 @@ export function Reports({
   reviewEnabled = true,
   pending,
   speedUnit = "mph",
+  gpsLocation = null,
+  twoWheelerFlagsMap = null,
 }: {
   store: SessionStore;
   revision: number;
@@ -102,7 +105,19 @@ export function Reports({
   reviewEnabled?: boolean;
   pending?: string;
   speedUnit?: SpeedUnit;
+  gpsLocation?: GeotaggedLocation | null;
+  twoWheelerFlagsMap?: Map<number, { isTripleRiding?: boolean; hasNoHelmet?: boolean }> | null;
 }) {
+  const [currentGeo, setCurrentGeo] = useState<GeotaggedLocation | null>(gpsLocation ?? null);
+
+  useEffect(() => {
+    if (gpsLocation) {
+      setCurrentGeo(gpsLocation);
+    } else {
+      getCurrentGeoLocation().then((loc) => setCurrentGeo(loc));
+    }
+  }, [gpsLocation]);
+
   const [selected, setSelected] = useState<string | null>(null);
   const [selectedChallan, setSelectedChallan] = useState<EChallanNotice | null>(null);
   const [filter, setFilter] = useState("all");
@@ -514,7 +529,26 @@ export function Reports({
               className="challan-trigger-btn"
               data-testid="generate-challan-btn"
               onClick={() => {
-                const notice = createEChallanFromReport(report, urls);
+                const flags =
+                  report.trackId !== null && twoWheelerFlagsMap
+                    ? twoWheelerFlagsMap.get(report.trackId)
+                    : undefined;
+                const notice = createEChallanFromReport(
+                  report,
+                  urls,
+                  undefined,
+                  currentGeo
+                    ? {
+                        latitude: currentGeo.coordinates.latitude,
+                        longitude: currentGeo.coordinates.longitude,
+                        accuracyM: currentGeo.coordinates.accuracyM,
+                        formattedDms: currentGeo.formattedDms,
+                        mapUrl: currentGeo.mapUrl,
+                        landmark: currentGeo.landmark,
+                      }
+                    : undefined,
+                  flags,
+                );
                 setSelectedChallan(notice);
                 setSelected(null);
               }}

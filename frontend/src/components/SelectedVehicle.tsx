@@ -11,6 +11,8 @@ import { displaySpeed, type SpeedUnit } from "./speedUnits";
  * number, because a speed that is actually unavailable is the one thing a
  * traffic tool must not invent.
  */
+import type { TwoWheelerAnalysisResult } from "../violations/twoWheelerAnalyzer";
+
 export interface SelectedVehicleProps {
   track: TrackView | null;
   /** True when the selected identity is no longer in the analysed frame. */
@@ -31,6 +33,7 @@ export interface SelectedVehicleProps {
   isScanningIndianPlate?: boolean;
   indianPlateResult?: string | null;
   indianPlateDetail?: string | null;
+  twoWheelerResult?: TwoWheelerAnalysisResult | null;
 }
 
 const MOTION: Record<string, string> = {
@@ -92,6 +95,7 @@ export function SelectedVehicle({
   isScanningIndianPlate = false,
   indianPlateResult = null,
   indianPlateDetail = null,
+  twoWheelerResult = null,
 }: SelectedVehicleProps) {
   if (!track && !lost) return null;
   const over =
@@ -179,6 +183,22 @@ export function SelectedVehicle({
                 )}
               </dd>
             </div>
+            {track.className === "motorcycle" && twoWheelerResult && (
+              <div>
+                <dt>Two-Wheeler Safety</dt>
+                <dd data-testid="selected-twowheeler-status">
+                  {twoWheelerResult.violations.length > 0 ? (
+                    <span className="twowheeler-violation-badge">
+                      {twoWheelerResult.violations.map((v) => v.titleEn).join(" · ")} (Fine: ₹{twoWheelerResult.totalFineInr})
+                    </span>
+                  ) : (
+                    <span className="twowheeler-compliant-badge">
+                      ✓ Compliant ({twoWheelerResult.estimatedRiderCount} {twoWheelerResult.estimatedRiderCount === 1 ? "rider" : "riders"}, Helmet OK)
+                    </span>
+                  )}
+                </dd>
+              </div>
+            )}
           </dl>
           <div className="actions">
             {onScanIndianPlate && (

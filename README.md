@@ -9,6 +9,7 @@
 <br />
 
 [![Live Demo](https://img.shields.io/badge/🚀_Live_Production_App-roadlens--ai--lime.vercel.app-00C7B7?style=for-the-badge&logo=vercel&logoColor=white)](https://roadlens-ai-lime.vercel.app)
+[![Live Camera](https://img.shields.io/badge/📷_Live_Camera_HUD-roadlens--ai--lime.vercel.app%2Fcamera-FF5722?style=for-the-badge&logo=webcam&logoColor=white)](https://roadlens-ai-lime.vercel.app/camera)
 [![GitHub Stars](https://img.shields.io/github/stars/ajinkyachalke008/Roadlens-AI?style=for-the-badge&color=ffd700)](https://github.com/ajinkyachalke008/Roadlens-AI)
 [![React 19](https://img.shields.io/badge/React_19-20232A?style=for-the-badge&logo=react&logoColor=61DAFB)](https://react.dev)
 [![TypeScript](https://img.shields.io/badge/TypeScript_5-007ACC?style=for-the-badge&logo=typescript&logoColor=white)](https://www.typescriptlang.org)
@@ -18,7 +19,7 @@
 
 <br />
 
-[🌐 **Open Live App**](https://roadlens-ai-lime.vercel.app) · [📱 **Mobile Instructions**](#-mobile-quickstart) · [🛠️ **Local Setup**](#-local-development-quickstart) · [🏗️ **Architecture**](#-real-time-architecture-pipeline) · [📖 **Docs**](docs/)
+[🌐 **Open Live App**](https://roadlens-ai-lime.vercel.app) · [📷 **Open Live Camera**](https://roadlens-ai-lime.vercel.app/camera) · [📱 **Mobile Instructions**](#-mobile-quickstart) · [🛠️ **Local Setup**](#-local-development-quickstart) · [🏗️ **Architecture**](#-real-time-architecture-pipeline) · [📖 **Docs**](docs/)
 
 </div>
 
@@ -120,20 +121,35 @@ flowchart LR
 * **Full HSRP & Bharat Series Support**: Accurately recognizes and validates both standard Indian HSRP registration plates (`MH 12 AB 1234`) and Bharat series plates (`22 BH 1234 AA`).
 * **Instant RTO & State Intelligence**: Position-aware OCR with integrated dictionary mapping across all 36 Indian States/UTs and RTO districts (e.g., *MH 12* → *Maharashtra (Pune)*, *DL 01* → *Delhi (Mall Road)*).
 * **Live HUD Overlay & Web Audio Chime**: Displays the recognized Indian license plate directly atop the vehicle's bounding box overlay in real-time, accompanied by a pleasant synthesized audio chime.
-* **Automatic Evidence Reports**: Automatically generates timestamped vehicle observation reports accompanied by full photographic evidence snapshots.
+
+### 🤖 7. AI Forensic Chatbox & Natural Language Vehicle Search (Phase 2)
+* **Natural Language Queries**: Type or speak queries like *"Find all red cars"*, *"Show vehicles faster than 50 km/h"*, *"List two-wheelers from Maharashtra"*, or *"Where was MH12AB1234 last seen?"*.
+* **100% Real & Live Client Engine**: Deterministic AST parser and predicate matcher evaluating real live camera frames and persistent IndexedDB (`roadlens-live-forensics`) records in milliseconds.
+* **Vehicle Forensic Dossier & Interactive Leaflet Map**: Deep-dive vehicle page (`/forensics/vehicle/:id`) with MoRTH registration status, speed analytics, chronological timeline, and sequential CCTV sighting route maps rendered with OpenStreetMap.
+
+### 🛠️ 8. Live System Health & Diagnostics Drawer (HUD)
+* **Real-Time Operational Observability**: Cyber HUD panel showing dynamic composite health score (0–100%) and pulse indicator (`ALL SYSTEMS OPERATIONAL`).
+* **6 Core Subsystems Matrix**: Live monitoring for Camera & Video Capture (FPS, resolution, dropped frames), AI Vision (ONNX YOLO26n WASM latency), Indian ANPR & OCR, Persistent IndexedDB storage, FastAPI Backend cluster, and WebRTC relay.
+* **Live Event Stream & Diagnostics Probes**: Filterable log terminal (`Errors`, `Warnings`, `Info`), automatic capture of browser exceptions, one-click subsystem probes (`🔄 Probe Now`), and exportable JSON diagnostic reports (`📋 Copy Report`).
+
+### 📄 9. Indian e-Challan Notice Generator & Parivahan Integration
+* **Motor Vehicles (Amendment) Act 2019**: Computes official Indian traffic fines for speeding, helmet violations, red-light jumps, and dangerous driving.
+* **Bilingual Notice Documents**: Instant generation of official printable e-Challan receipts in English and Hindi.
+* **Direct Official Verification**: Direct deep-links to the Ministry of Road Transport and Highways official Parivahan e-Challan portal (`echallan.parivahan.gov.in`).
 
 ---
 
 ## 🚀 Live Demo & Mobile Quickstart
 
-### 🌐 Live Production Application
-👉 **[https://roadlens-ai-lime.vercel.app](https://roadlens-ai-lime.vercel.app)**
+### 🌐 Live Production Deployments
+* 🏠 **Main Portal**: **[https://roadlens-ai-lime.vercel.app](https://roadlens-ai-lime.vercel.app)**
+* 📷 **Live Camera & AI Control Center**: **[https://roadlens-ai-lime.vercel.app/camera](https://roadlens-ai-lime.vercel.app/camera)**
 
 ### 📱 Testing on Mobile:
-1. Open [https://roadlens-ai-lime.vercel.app](https://roadlens-ai-lime.vercel.app) in Safari (iOS) or Chrome (Android).
-2. Allow camera access (served over secure HTTPS).
-3. Mount the phone facing a road or street.
-4. Watch real-time bounding boxes, vehicle classifications, and speed calculations live on screen!
+1. Open **[https://roadlens-ai-lime.vercel.app/camera](https://roadlens-ai-lime.vercel.app/camera)** in Safari (iOS) or Chrome (Android).
+2. Allow camera access (served securely over HTTPS).
+3. Point or mount the phone facing a road or traffic stream.
+4. Watch real-time bounding boxes, vehicle classifications, speeds, license plates, and AI forensic intelligence live on screen!
 
 ---
 

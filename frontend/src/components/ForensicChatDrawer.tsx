@@ -19,13 +19,63 @@ interface ForensicChatDrawerProps {
   onSelectReport?: (reportId: string) => void;
 }
 
-const QUICK_PROMPTS = [
-  "Find all red cars and their number plate",
-  "Show all speeding vehicles",
-  "Find vehicles with scanned plates",
-  "Show all trucks",
-  "Find two-wheelers with violations",
-  "Find white cars",
+const QUICK_PROMPT_CATEGORIES = [
+  {
+    label: "🎨 By Color",
+    prompts: [
+      "Find all red vehicles",
+      "Show white cars",
+      "Find black vehicles",
+      "Show blue cars",
+      "Find silver vehicles",
+      "Show yellow vehicles",
+      "Find green vehicles",
+      "Show orange vehicles",
+    ],
+  },
+  {
+    label: "🚗 By Type",
+    prompts: [
+      "Show all cars",
+      "Find all trucks",
+      "Show all buses",
+      "Find all two-wheelers",
+      "Show all motorcycles",
+    ],
+  },
+  {
+    label: "⚡ Speed & Violations",
+    prompts: [
+      "Show all speeding vehicles",
+      "Find vehicles over 60 km/h",
+      "Find vehicles over 80 km/h",
+      "Find two-wheelers with violations",
+      "Show vehicles with helmet violations",
+      "Find triple riding violations",
+    ],
+  },
+  {
+    label: "🇮🇳 Plates & RTO",
+    prompts: [
+      "Find vehicles with scanned plates",
+      "Show vehicles from Maharashtra (MH)",
+      "Find plates from Delhi (DL)",
+      "Show plates from Karnataka (KA)",
+      "Find plates from Gujarat (GJ)",
+      "Show all number plates",
+    ],
+  },
+  {
+    label: "🔍 Combined Search",
+    prompts: [
+      "Find red cars and their number plate",
+      "Show speeding trucks",
+      "Find white two-wheelers",
+      "Show black cars with plates",
+      "Find blue trucks",
+      "Show all vehicles detected",
+    ],
+  },
 ];
 
 export function ForensicChatDrawer({
@@ -107,19 +157,24 @@ export function ForensicChatDrawer({
       </div>
 
       <div className="forensic-prompts-bar">
-        <span className="prompts-label">Quick Prompts:</span>
-        <div className="prompts-scroll">
-          {QUICK_PROMPTS.map((prompt) => (
-            <button
-              key={prompt}
-              type="button"
-              className="prompt-pill"
-              onClick={() => handleSend(prompt)}
-            >
-              {prompt}
-            </button>
-          ))}
-        </div>
+        <span className="prompts-label">Quick Prompts — tap any to search instantly:</span>
+        {QUICK_PROMPT_CATEGORIES.map((cat) => (
+          <div key={cat.label} className="prompt-category">
+            <span className="prompt-category-label">{cat.label}</span>
+            <div className="prompts-scroll">
+              {cat.prompts.map((prompt) => (
+                <button
+                  key={prompt}
+                  type="button"
+                  className="prompt-pill"
+                  onClick={() => handleSend(prompt)}
+                >
+                  {prompt}
+                </button>
+              ))}
+            </div>
+          </div>
+        ))}
       </div>
 
       <div className="forensic-messages-container">

@@ -2498,7 +2498,9 @@ hr {
   border-bottom: 1px solid #1e3325;
   display: flex;
   flex-direction: column;
-  gap: 6px;
+  gap: 8px;
+  max-height: 220px;
+  overflow-y: auto;
 }
 
 .prompts-label {
@@ -2509,11 +2511,27 @@ hr {
   letter-spacing: 0.5px;
 }
 
+.prompt-category {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+}
+
+.prompt-category-label {
+  font-size: 10px;
+  font-weight: 800;
+  text-transform: uppercase;
+  color: #4ade80;
+  letter-spacing: 0.6px;
+  padding-left: 2px;
+}
+
 .prompts-scroll {
   display: flex;
-  gap: 8px;
+  gap: 6px;
   overflow-x: auto;
   padding-bottom: 4px;
+  flex-wrap: nowrap;
 }
 
 .prompt-pill {
@@ -2526,6 +2544,7 @@ hr {
   border-radius: 14px;
   cursor: pointer;
   transition: all 0.15s ease;
+  flex-shrink: 0;
 }
 .prompt-pill:hover {
   background: #274333;

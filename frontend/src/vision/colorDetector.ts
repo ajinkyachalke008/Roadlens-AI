@@ -1,11 +1,12 @@
 /**
  * Vehicle Dominant Color Detection using HSV Clustering.
  * Analyzes the central body region of a detected vehicle to extract
- * its primary automotive color (Red, White, Black, Blue, Silver, etc.).
+ * its primary automotive color (Red, White, Black, Blue, Silver, Brown, etc.).
+ * Guarantees zero fake/mocked data: if confidence < 0.40, reports Unknown.
  */
 
 export interface VehicleColorResult {
-  name: "Red" | "White" | "Black" | "Silver" | "Blue" | "Yellow" | "Green" | "Orange";
+  name: "Red" | "White" | "Black" | "Silver" | "Blue" | "Yellow" | "Green" | "Orange" | "Brown" | "Unknown";
   hex: string;
   emoji: string;
   confidence: number;
@@ -62,7 +63,12 @@ export function classifyHsv(h: number, s: number, v: number): Omit<VehicleColorR
     return { name: "Silver", hex: "#94a3b8", emoji: "🔘" };
   }
 
-  // 4. Chromatic Hues
+  // 4. Brown / Bronze (Hue 15-45 with low-to-mid value)
+  if (h >= 15 && h <= 45 && v <= 55 && s >= 25) {
+    return { name: "Brown", hex: "#78350f", emoji: "🟤" };
+  }
+
+  // 5. Chromatic Hues
   if ((h >= 345 && h <= 360) || (h >= 0 && h <= 15)) {
     return { name: "Red", hex: "#dc2626", emoji: "🔴" };
   }
@@ -79,7 +85,6 @@ export function classifyHsv(h: number, s: number, v: number): Omit<VehicleColorR
     return { name: "Blue", hex: "#2563eb", emoji: "🔵" };
   }
   if (h > 265 && h < 345) {
-    // Reddish-purple falls into Red for vehicle classifications
     return { name: "Red", hex: "#dc2626", emoji: "🔴" };
   }
 
@@ -88,9 +93,10 @@ export function classifyHsv(h: number, s: number, v: number): Omit<VehicleColorR
 
 /**
  * Analyzes pixel buffer to determine the most frequent vehicle body color.
+ * If confidence < 0.40, reports Unknown rather than fabricating a color.
  */
 export function detectDominantColorFromPixels(data: Uint8ClampedArray): VehicleColorResult {
-  const counts: Record<VehicleColorResult["name"], number> = {
+  const counts: Record<Exclude<VehicleColorResult["name"], "Unknown">, number> = {
     Red: 0,
     White: 0,
     Black: 0,
@@ -99,10 +105,11 @@ export function detectDominantColorFromPixels(data: Uint8ClampedArray): VehicleC
     Yellow: 0,
     Green: 0,
     Orange: 0,
+    Brown: 0,
   };
 
   let totalSampled = 0;
-  // Step by 4 to sample every 4th pixel for speed while preserving accuracy
+  // Step by 16 bytes (every 4th pixel) for balance of speed and coverage
   for (let i = 0; i < data.length; i += 16) {
     const alpha = data[i + 3];
     if (alpha < 128) continue;
@@ -113,36 +120,58 @@ export function detectDominantColorFromPixels(data: Uint8ClampedArray): VehicleC
 
     const [h, s, v] = rgbToHsv(r, g, b);
     const classified = classifyHsv(h, s, v);
-    counts[classified.name]++;
-    totalSampled++;
+    if (classified.name in counts) {
+      counts[classified.name as keyof typeof counts]++;
+      totalSampled++;
+    }
   }
 
   if (totalSampled === 0) {
-    return { name: "Silver", hex: "#94a3b8", emoji: "🔘", confidence: 0.5 };
+    return { name: "Unknown", hex: "#64748b", emoji: "❓", confidence: 0.0 };
   }
 
-  let topColor: VehicleColorResult["name"] = "Silver";
+  let topColor: Exclude<VehicleColorResult["name"], "Unknown"> = "Silver";
   let maxCount = 0;
 
-  for (const [colorName, count] of Object.entries(counts) as [VehicleColorResult["name"], number][]) {
+  for (const [colorName, count] of Object.entries(counts) as [Exclude<VehicleColorResult["name"], "Unknown">, number][]) {
     if (count > maxCount) {
       maxCount = count;
       topColor = colorName;
     }
   }
 
-  const confidence = Math.min(1, Math.round((maxCount / totalSampled) * 100) / 100);
-  const metadata = classifyHsv(
-    topColor === "Red" ? 0 : topColor === "Blue" ? 210 : topColor === "Green" ? 120 : topColor === "Yellow" ? 60 : 0,
-    topColor === "White" || topColor === "Black" || topColor === "Silver" ? 5 : 80,
-    topColor === "Black" ? 10 : topColor === "White" ? 95 : 60,
-  );
+  const rawConfidence = Math.round((maxCount / totalSampled) * 100) / 100;
+
+  // Strict honest threshold: if below 0.40, declare Unknown
+  if (rawConfidence < 0.4) {
+    return {
+      name: "Unknown",
+      hex: "#64748b",
+      emoji: "❓",
+      confidence: rawConfidence,
+    };
+  }
+
+  const sampleCoords: Record<typeof topColor, [number, number, number]> = {
+    Red: [0, 80, 85],
+    Orange: [30, 85, 90],
+    Yellow: [55, 90, 90],
+    Green: [120, 80, 70],
+    Blue: [215, 80, 85],
+    Brown: [30, 70, 45],
+    White: [0, 5, 95],
+    Black: [0, 0, 15],
+    Silver: [0, 0, 60],
+  };
+
+  const coords = sampleCoords[topColor] ?? [0, 0, 60];
+  const metadata = classifyHsv(coords[0], coords[1], coords[2]);
 
   return {
     name: topColor,
     hex: metadata.hex,
     emoji: metadata.emoji,
-    confidence: Math.max(0.6, confidence),
+    confidence: rawConfidence,
   };
 }
 
@@ -163,7 +192,6 @@ export function detectDominantColor(
 
   if (bbox) {
     let [bx, by, bw, bh] = bbox;
-    // Normalize coordinates if needed
     if (bw <= 1 && bh <= 1) {
       bx = bx * width;
       by = by * height;
@@ -183,13 +211,13 @@ export function detectDominantColor(
     tempCanvas.height = Math.min(60, h);
     const ctx = tempCanvas.getContext("2d", { willReadFrequently: true });
     if (!ctx) {
-      return { name: "Silver", hex: "#94a3b8", emoji: "🔘", confidence: 0.5 };
+      return { name: "Unknown", hex: "#64748b", emoji: "❓", confidence: 0.0 };
     }
 
     ctx.drawImage(canvas, x, y, w, h, 0, 0, tempCanvas.width, tempCanvas.height);
     const imgData = ctx.getImageData(0, 0, tempCanvas.width, tempCanvas.height);
     return detectDominantColorFromPixels(imgData.data);
   } catch {
-    return { name: "Silver", hex: "#94a3b8", emoji: "🔘", confidence: 0.5 };
+    return { name: "Unknown", hex: "#64748b", emoji: "❓", confidence: 0.0 };
   }
 }

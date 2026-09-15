@@ -82,5 +82,31 @@ describe("colorDetector", () => {
     const blueResult = detectDominantColorFromPixels(bluePixels);
     expect(blueResult.name).toBe("Blue");
     expect(blueResult.confidence).toBeGreaterThanOrEqual(0.6);
+
+    // Brown classification
+    expect(classifyHsv(30, 70, 45).name).toBe("Brown");
+
+    // Low confidence returns Unknown (no mock / honest reporting)
+    // 5 different colors equally distributed across the 16-byte sampling stride
+    const noisyPixels = new Uint8ClampedArray(80 * 4);
+    const colors = [
+      [255, 0, 0], // Red
+      [0, 0, 255], // Blue
+      [0, 255, 0], // Green
+      [255, 255, 0], // Yellow
+      [255, 255, 255], // White
+    ];
+    let colorIdx = 0;
+    for (let i = 0; i < noisyPixels.length; i += 16) {
+      const [r, g, b] = colors[colorIdx % colors.length];
+      noisyPixels[i] = r;
+      noisyPixels[i + 1] = g;
+      noisyPixels[i + 2] = b;
+      noisyPixels[i + 3] = 255;
+      colorIdx++;
+    }
+    const noisyResult = detectDominantColorFromPixels(noisyPixels);
+    expect(noisyResult.name).toBe("Unknown");
   });
 });
+

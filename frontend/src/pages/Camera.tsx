@@ -70,7 +70,9 @@ import {
   type VehicleColorResult,
 } from "../vision/colorDetector";
 import { ForensicChatDrawer } from "../components/ForensicChatDrawer";
-import type { VehicleRecord } from "../ai/trafficQueryEngine";
+import { recordToObservation, type VehicleRecord } from "../ai/trafficQueryEngine";
+import { saveObservation } from "../session/forensicDb";
+import { VehicleForensicPage } from "./VehicleForensicPage";
 import { parseIndianPlate } from "../../../shared/src/indianPlates";
 import { ChallanModal } from "../components/ChallanModal";
 import { createEChallanFromReport, type EChallanNotice } from "../challan/challanGenerator";
@@ -120,6 +122,7 @@ export default function Camera() {
   const [drawer, setDrawer] = useState<
     "settings" | "calibration" | "validation" | "end" | "analytics" | null
   >(null);
+  const [selectedDossierVehicle, setSelectedDossierVehicle] = useState<string | null>(null);
   // Session-scoped, RAM-only, cleared with everything else at End session.
   const validation = useRef(new SpeedValidationSession());
   /**
@@ -1318,6 +1321,14 @@ export default function Camera() {
     return list;
   }, [store.reports, revision, frame, indianPlateResults, vehicleColorsRev]);
 
+  useEffect(() => {
+    if (queryRecords.length === 0) return;
+    for (const r of queryRecords.slice(0, 20)) {
+      const obs = recordToObservation(r);
+      saveObservation(obs).catch(() => {});
+    }
+  }, [queryRecords]);
+
   return (
     <>
       <div className="page-heading">
@@ -2385,6 +2396,10 @@ export default function Camera() {
         <ForensicChatDrawer
           records={queryRecords}
           onClose={() => setChatOpen(false)}
+          onViewDossier={(vehId) => {
+            setChatOpen(false);
+            setSelectedDossierVehicle(vehId);
+          }}
           onSelectReport={(reportId) => {
             const rep = store.reports.get(reportId);
             if (rep) {
@@ -2412,6 +2427,41 @@ export default function Camera() {
             }
           }}
         />
+      )}
+      {selectedDossierVehicle && (
+        <div className="dossier-overlay-modal" role="dialog" aria-modal="true">
+          <VehicleForensicPage
+            vehicleId={selectedDossierVehicle}
+            onBack={() => setSelectedDossierVehicle(null)}
+            onIssueChallan={(obs) => {
+              const rep = obs.reportId ? store.reports.get(obs.reportId) : null;
+              if (rep) {
+                const blob = rep.evidenceId ? store.image(rep.evidenceId) : null;
+                const imgUrl = blob ? URL.createObjectURL(blob) : undefined;
+                const flags = rep.trackId !== null ? twoWheelerFlagsMap.current.get(rep.trackId) : undefined;
+                const geoObj = gpsLocation
+                  ? {
+                      latitude: gpsLocation.coordinates.latitude,
+                      longitude: gpsLocation.coordinates.longitude,
+                      accuracyM: gpsLocation.coordinates.accuracyM,
+                      formattedDms: gpsLocation.formattedDms,
+                      mapUrl: gpsLocation.mapUrl,
+                      landmark: gpsLocation.landmark,
+                    }
+                  : undefined;
+                const notice = createEChallanFromReport(
+                  rep,
+                  { event: imgUrl },
+                  gpsLocation?.landmark ?? "National Highway / Urban Corridor · Sector 4",
+                  geoObj,
+                  flags,
+                );
+                setSelectedChallan(notice);
+              }
+              setSelectedDossierVehicle(null);
+            }}
+          />
+        </div>
       )}
       {selectedChallan && (
         <ChallanModal

@@ -1,8 +1,17 @@
 import { lazy, Suspense } from "react";
 const Camera = lazy(() => import("./pages/Camera"));
 const Viewer = lazy(() => import("./pages/Viewer"));
+const VehicleForensicPage = lazy(() =>
+  import("./pages/VehicleForensicPage").then((m) => ({ default: m.VehicleForensicPage })),
+);
+
 export default function App() {
   const route = location.pathname;
+  const isVehicleForensicRoute = route.startsWith("/forensics/vehicle/");
+  const vehicleIdFromRoute = isVehicleForensicRoute
+    ? decodeURIComponent(route.replace("/forensics/vehicle/", "").trim())
+    : null;
+
   return (
     <>
       <header className="header">
@@ -15,7 +24,16 @@ export default function App() {
         <span className="header-note">On-device · Temporary</span>
       </header>
       <main>
-        {route === "/camera" ? (
+        {isVehicleForensicRoute && vehicleIdFromRoute ? (
+          <Suspense fallback={<p role="status">Loading vehicle forensic dossier…</p>}>
+            <VehicleForensicPage
+              vehicleId={vehicleIdFromRoute}
+              onBack={() => {
+                window.location.href = "/camera";
+              }}
+            />
+          </Suspense>
+        ) : route === "/camera" || route === "/forensics" ? (
           <Suspense fallback={<p role="status">Preparing camera…</p>}>
             <Camera />
           </Suspense>

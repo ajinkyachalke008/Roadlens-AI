@@ -7,7 +7,9 @@
   "rewrites": [
     { "source": "/camera", "destination": "/index.html" },
     { "source": "/viewer", "destination": "/index.html" },
-    { "source": "/admin", "destination": "/index.html" }
+    { "source": "/admin", "destination": "/index.html" },
+    { "source": "/forensics", "destination": "/index.html" },
+    { "source": "/forensics/(.*)", "destination": "/index.html" }
   ],
   "headers": [
     {

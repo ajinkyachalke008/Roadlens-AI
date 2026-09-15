@@ -45,7 +45,9 @@
     "measure:production": "node scripts/measure-production.mjs"
   },
   "dependencies": {
+    "@types/leaflet": "^1.9.22",
     "express": "5.2.1",
+    "leaflet": "^1.9.4",
     "ml-matrix": "6.15.0",
     "onnxruntime-web": "1.29.0",
     "react": "19.3.0",

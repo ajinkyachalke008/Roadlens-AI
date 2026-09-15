@@ -1,22 +1,25 @@
 import { useState, useRef, useEffect } from "react";
 import {
-  executeTrafficQuery,
   type VehicleRecord,
-  type QueryResult,
+  recordToObservation,
 } from "../ai/trafficQueryEngine";
+import type { ForensicSearchResponse, AmbiguityClarification } from "../../../shared/src/forensicTypes";
+import { searchForensics, checkBackendHealth } from "../api/forensicsClient";
 
 export interface ChatMessage {
   id: string;
   sender: "user" | "assistant";
   text: string;
   timestamp: string;
-  queryResult?: QueryResult;
+  queryResult?: ForensicSearchResponse;
+  ambiguity?: AmbiguityClarification;
 }
 
 interface ForensicChatDrawerProps {
   records: VehicleRecord[];
   onClose: () => void;
   onSelectReport?: (reportId: string) => void;
+  onViewDossier?: (vehicleId: string) => void;
 }
 
 const QUICK_PROMPT_CATEGORIES = [
@@ -31,6 +34,7 @@ const QUICK_PROMPT_CATEGORIES = [
       "Show yellow vehicles",
       "Find green vehicles",
       "Show orange vehicles",
+      "Find brown vehicles",
     ],
   },
   {
@@ -52,6 +56,7 @@ const QUICK_PROMPT_CATEGORIES = [
       "Find two-wheelers with violations",
       "Show vehicles with helmet violations",
       "Find triple riding violations",
+      "The fastest vehicles today",
     ],
   },
   {
@@ -82,7 +87,9 @@ export function ForensicChatDrawer({
   records,
   onClose,
   onSelectReport,
+  onViewDossier,
 }: ForensicChatDrawerProps) {
+  const [isEnterpriseOnline, setIsEnterpriseOnline] = useState(false);
   const [messages, setMessages] = useState<ChatMessage[]>(() => [
     {
       id: "msg-welcome",
@@ -97,6 +104,10 @@ export function ForensicChatDrawer({
   const inputRef = useRef<HTMLInputElement | null>(null);
 
   useEffect(() => {
+    checkBackendHealth().then((online) => setIsEnterpriseOnline(online));
+  }, []);
+
+  useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [messages]);
 
@@ -104,7 +115,7 @@ export function ForensicChatDrawer({
     inputRef.current?.focus();
   }, []);
 
-  const handleSend = (textToSend?: string) => {
+  const handleSend = async (textToSend?: string) => {
     const query = (textToSend ?? inputText).trim();
     if (!query || isProcessing) return;
 
@@ -119,19 +130,31 @@ export function ForensicChatDrawer({
     setInputText("");
     setIsProcessing(true);
 
-    setTimeout(() => {
-      const result = executeTrafficQuery(query, records);
+    try {
+      const liveObservations = records.map((r) => recordToObservation(r));
+      const result = await searchForensics(query, liveObservations);
+
       const assistantMsg: ChatMessage = {
         id: `ai-${Date.now()}`,
         sender: "assistant",
-        text: result.summaryText,
+        text: result.summary,
         timestamp: new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }),
         queryResult: result,
+        ambiguity: result.ambiguity,
       };
 
       setMessages((prev) => [...prev, assistantMsg]);
+    } catch {
+      const errorMsg: ChatMessage = {
+        id: `ai-err-${Date.now()}`,
+        sender: "assistant",
+        text: "Error searching vehicle observations. Please try a different query.",
+        timestamp: new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }),
+      };
+      setMessages((prev) => [...prev, errorMsg]);
+    } finally {
       setIsProcessing(false);
-    }, 250);
+    }
   };
 
   return (
@@ -141,9 +164,14 @@ export function ForensicChatDrawer({
           <span className="forensic-avatar" aria-hidden="true">🤖</span>
           <div>
             <h3>RoadLens AI Forensic Assistant</h3>
-            <p>
-              Natural Language CCTV Search · <span className="live-dot" /> {records.length} vehicles indexed in RAM
-            </p>
+            <div className="forensic-status-line">
+              <span className={`engine-badge ${isEnterpriseOnline ? "enterprise" : "client"}`}>
+                {isEnterpriseOnline ? "● Enterprise PostGIS Cluster" : "● Live Camera Stream Search"}
+              </span>
+              <span className="indexed-count">
+                · {records.length} vehicles indexed in RAM
+              </span>
+            </div>
           </div>
         </div>
         <button
@@ -189,16 +217,41 @@ export function ForensicChatDrawer({
                   {msg.sender === "user" ? "You" : "RoadLens AI"}
                 </span>
                 <span className="msg-time">{msg.timestamp}</span>
+                {msg.queryResult && (
+                  <span className="latency-badge">
+                    {msg.queryResult.executionTimeMs}ms
+                  </span>
+                )}
               </div>
               <p className="msg-text">{msg.text}</p>
 
-              {msg.queryResult && msg.queryResult.matchedRecords.length > 0 && (
+              {/* Ambiguity clarification buttons */}
+              {msg.ambiguity?.isAmbiguous && (
+                <div className="ambiguity-box">
+                  <span className="ambiguity-title">💡 {msg.ambiguity.reason}</span>
+                  <div className="ambiguity-chips">
+                    {msg.ambiguity.options.map((opt) => (
+                      <button
+                        key={opt.label}
+                        type="button"
+                        className="ambiguity-chip-btn"
+                        onClick={() => handleSend(opt.query)}
+                      >
+                        {opt.label}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+              )}
+
+              {msg.queryResult && msg.queryResult.matchedObservations.length > 0 && (
                 <div className="matched-records-grid">
-                  {msg.queryResult.matchedRecords.map((rec) => (
+                  {msg.queryResult.matchedObservations.map((obs) => (
                     <VehicleCardItem
-                      key={rec.id}
-                      rec={rec}
+                      key={obs.id}
+                      obs={obs}
                       onSelectReport={onSelectReport}
+                      onViewDossier={onViewDossier}
                     />
                   ))}
                 </div>
@@ -251,66 +304,68 @@ export function ForensicChatDrawer({
 }
 
 function VehicleCardItem({
-  rec,
+  obs,
   onSelectReport,
+  onViewDossier,
 }: {
-  rec: VehicleRecord;
+  obs: {
+    id: string;
+    reportId?: string;
+    trackId: number | null;
+    vehicleClass: string;
+    color: { name: string; hex: string; confidence: number };
+    plate: { text: string | null; stateCode: string | null; rtoLocation?: string | null; confidence: number };
+    speed: { kmh: number | null; isSpeeding: boolean };
+    violations: string[];
+    snapshotDataUrl?: string | null;
+  };
   onSelectReport?: (reportId: string) => void;
+  onViewDossier?: (vehicleId: string) => void;
 }) {
-  const [imgUrl, setImgUrl] = useState<string | null>(null);
-
-  useEffect(() => {
-    if (rec.thumbnailBlob) {
-      const url = URL.createObjectURL(rec.thumbnailBlob);
-      setImgUrl(url);
-      return () => URL.revokeObjectURL(url);
-    }
-    if (rec.thumbnailUrl) {
-      setImgUrl(rec.thumbnailUrl);
-    }
-  }, [rec.thumbnailBlob, rec.thumbnailUrl]);
-
   return (
     <div className="vehicle-match-card">
       <div className="match-card-head">
         <span className="vehicle-class-tag">
-          {rec.className.toUpperCase()} {rec.trackId != null ? `· ID ${rec.trackId}` : ""}
+          {obs.vehicleClass.toUpperCase()} {obs.trackId != null ? `· ID ${obs.trackId}` : ""}
         </span>
         <span
           className="vehicle-color-pill"
           style={{
-            borderColor: rec.color.hex,
-            backgroundColor: `${rec.color.hex}18`,
+            borderColor: obs.color.hex,
+            backgroundColor: `${obs.color.hex}18`,
           }}
         >
           <i
             className="color-dot"
-            style={{ backgroundColor: rec.color.hex }}
+            style={{ backgroundColor: obs.color.hex }}
           />
-          {rec.color.name}
+          {obs.color.name}
+          <small className="color-conf-sub">
+            ({Math.round(obs.color.confidence * 100)}%)
+          </small>
         </span>
       </div>
 
-      {imgUrl && (
+      {obs.snapshotDataUrl && (
         <div className="match-thumbnail-wrap">
           <img
-            src={imgUrl}
-            alt={`${rec.color.name} ${rec.className}`}
+            src={obs.snapshotDataUrl}
+            alt={`${obs.color.name} ${obs.vehicleClass}`}
             className="match-thumbnail"
           />
         </div>
       )}
 
       <div className="match-details">
-        {rec.plateText ? (
+        {obs.plate.text ? (
           <div className="match-plate">
             <span className="plate-badge-hsrp">
               <span className="ind-bar">IND</span>
-              <strong>{rec.plateText}</strong>
+              <strong>{obs.plate.text}</strong>
             </span>
-            {rec.rtoLocation && (
+            {obs.plate.rtoLocation && (
               <small className="rto-location-tag">
-                📍 {rec.stateName ? `${rec.stateName} · ` : ""}{rec.rtoLocation}
+                📍 {obs.plate.rtoLocation}
               </small>
             )}
           </div>
@@ -321,32 +376,44 @@ function VehicleCardItem({
         )}
 
         <div className="match-meta-row">
-          {rec.speedKmh != null && (
+          {obs.speed.kmh != null && (
             <span
-              className={`speed-pill ${rec.isSpeeding ? "speeding" : ""}`}
+              className={`speed-pill ${obs.speed.isSpeeding ? "speeding" : ""}`}
             >
-              ⚡ {rec.speedKmh} km/h
-              {rec.isSpeeding ? " · OVER LIMIT" : ""}
+              ⚡ {obs.speed.kmh} km/h
+              {obs.speed.isSpeeding ? " · OVER LIMIT" : ""}
             </span>
           )}
 
-          {rec.violations && rec.violations.length > 0 && (
+          {obs.violations && obs.violations.length > 0 && (
             <span className="violation-pill">
-              ⚠️ {rec.violations[0]}
+              ⚠️ {obs.violations[0]}
             </span>
           )}
         </div>
       </div>
 
-      {rec.reportId && onSelectReport && (
-        <button
-          type="button"
-          className="view-report-btn"
-          onClick={() => onSelectReport(rec.reportId!)}
-        >
-          📄 View Official e-Challan / Report ↗
-        </button>
-      )}
+      <div className="match-card-actions">
+        {onViewDossier && (
+          <button
+            type="button"
+            className="view-dossier-btn"
+            onClick={() => onViewDossier(obs.plate.text || obs.id)}
+          >
+            🗺️ Dossier & Route Map ➔
+          </button>
+        )}
+
+        {obs.reportId && onSelectReport && (
+          <button
+            type="button"
+            className="view-report-btn"
+            onClick={() => onSelectReport(obs.reportId!)}
+          >
+            📄 Issue e-Challan Notice ↗
+          </button>
+        )}
+      </div>
     </div>
   );
 }

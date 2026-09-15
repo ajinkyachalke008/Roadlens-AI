@@ -115,6 +115,13 @@ flowchart LR
 * Generate real-time summary statistics: total vehicle counts, vehicle classification breakdown, peak observation windows, and candidate events.
 * One-click export to **CSV** or **JSON** for immediate spreadsheet analysis in Excel or Google Sheets.
 
+### 🇮🇳 6. Automatic Indian Number Plate Scanning (Hands-Free Mode)
+* **Zero-Click Hands-Free Operation**: Whenever any vehicle passes the camera or violates a speed limit, RoadLens AI automatically crops the bumper region and scans the Indian number plate in the background without needing manual taps.
+* **Full HSRP & Bharat Series Support**: Accurately recognizes and validates both standard Indian HSRP registration plates (`MH 12 AB 1234`) and Bharat series plates (`22 BH 1234 AA`).
+* **Instant RTO & State Intelligence**: Position-aware OCR with integrated dictionary mapping across all 36 Indian States/UTs and RTO districts (e.g., *MH 12* → *Maharashtra (Pune)*, *DL 01* → *Delhi (Mall Road)*).
+* **Live HUD Overlay & Web Audio Chime**: Displays the recognized Indian license plate directly atop the vehicle's bounding box overlay in real-time, accompanied by a pleasant synthesized audio chime.
+* **Automatic Evidence Reports**: Automatically generates timestamped vehicle observation reports accompanied by full photographic evidence snapshots.
+
 ---
 
 ## 🚀 Live Demo & Mobile Quickstart

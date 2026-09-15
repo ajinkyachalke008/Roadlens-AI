@@ -1128,6 +1128,101 @@ export default function Camera() {
     setSelectedTrackId(trackId);
     if (capture.current) capture.current.selectedTrackId = trackId;
   };
+
+  const handleScanIndianPlate = async (targetId?: number | null) => {
+    if (!running) {
+      void start().then(() => {
+        setIndianPlateToast("📹 Camera starting... Click 'Scan Indian Number Plate' once vehicles appear in view.");
+      });
+      return;
+    }
+
+    const latest = capture.current?.latest;
+    if (!latest || !latest.canvas) {
+      setError("No active video frame available to scan. Please ensure the camera is running.");
+      return;
+    }
+
+    setScanningIndianPlate(true);
+    setIndianPlateToast("🔍 Scanning vehicle for Indian number plate...");
+
+    try {
+      // 1. Check if an explicit or currently selected track is targeted
+      let effectiveId = targetId !== undefined ? targetId : selectedTrackId;
+      let targetTrack =
+        effectiveId !== null
+          ? latest.result.tracks.find((t) => t.trackId === effectiveId)
+          : null;
+
+      // 2. If no track was selected, find the most prominent vehicle track
+      if (!targetTrack && latest.result.tracks.length > 0) {
+        const vehicleTracks = latest.result.tracks.filter((t) =>
+          ["car", "truck", "bus", "motorcycle"].includes(t.className),
+        );
+        if (vehicleTracks.length > 0) {
+          vehicleTracks.sort((a, b) => {
+            const areaA = (a.bbox[2] - a.bbox[0]) * (a.bbox[3] - a.bbox[1]);
+            const areaB = (b.bbox[2] - b.bbox[0]) * (b.bbox[3] - b.bbox[1]);
+            return areaB - areaA;
+          });
+          targetTrack = vehicleTracks[0];
+          effectiveId = targetTrack.trackId;
+          select(effectiveId);
+        }
+      }
+
+      const res = await scanIndianPlateFromCanvas(
+        latest.canvas,
+        targetTrack?.bbox ?? null,
+      );
+
+      if (res.success && res.plate) {
+        if (effectiveId !== null) {
+          setIndianPlateResults((prev) => {
+            const next = new Map(prev);
+            next.set(effectiveId!, {
+              text: res.plate!.formatted,
+              detail: `${res.plate!.stateName} (${res.plate!.rtoLocation})`,
+              confidence: res.confidence,
+            });
+            return next;
+          });
+        }
+
+        store.save(
+          latest.result,
+          latest.policy,
+          latest.jpeg,
+          "observation",
+          effectiveId ?? undefined,
+          undefined,
+          undefined,
+          {
+            plateStatus: "read",
+            plateText: res.plate.formatted,
+            plateConfidence: res.confidence,
+            plateSupportingFrames: 1,
+            plateDetectorConfidence: res.confidence,
+          },
+        );
+
+        setIndianPlateToast(
+          `🇮🇳 Plate Detected: ${res.plate.formatted} · ${res.plate.stateName} (${res.plate.rtoLocation})`,
+        );
+      } else {
+        setIndianPlateToast(
+          res.error ??
+            "Could not clearly detect an Indian number plate in this crop.",
+        );
+      }
+    } catch {
+      setIndianPlateToast("Plate scanner encountered a temporary error.");
+    } finally {
+      setScanningIndianPlate(false);
+      setTimeout(() => setIndianPlateToast(null), 6000);
+    }
+  };
+
   return (
     <>
       <div className="page-heading">
@@ -1157,15 +1252,32 @@ export default function Camera() {
           >
             {modeLabel}
           </span>
-          <span
+          <button
+            type="button"
             className={`badge auto-scan-badge ${autoScanEnabled ? "active auto-scan-active-badge" : ""}`}
             data-testid="auto-scan-badge"
-            title="Automatic Indian Plate Scanning (Hands-Free Mode)"
+            title="Click to toggle Automatic Indian Plate Scanning (Hands-Free Mode)"
+            style={{ cursor: "pointer", border: "none", font: "inherit" }}
+            onClick={() => {
+              const next = !autoScanEnabled;
+              setAutoScanEnabled(next);
+              if (next) {
+                setAutoScanToast(
+                  "⚡ Hands-Free Auto-Scan activated! Indian plates will be scanned automatically as vehicles pass.",
+                );
+                if (autoScanToastTimer.current)
+                  window.clearTimeout(autoScanToastTimer.current);
+                autoScanToastTimer.current = window.setTimeout(
+                  () => setAutoScanToast(null),
+                  4000,
+                );
+              }
+            }}
           >
             {autoScanEnabled
               ? `⚡ Auto-Scan: ON (${autoScanCount})`
               : "⚡ Auto-Scan: OFF"}
-          </span>
+          </button>
           <button
             type="button"
             role="switch"
@@ -1254,69 +1366,7 @@ export default function Camera() {
             setTimeout(() => setCapturedToast(false), 3000);
           }
         }}
-        onScanIndianPlate={async () => {
-          if (selectedTrackId === null) return;
-          const latest = capture.current?.latest;
-          if (!latest || !latest.canvas) {
-            setError("No active video frame available to scan.");
-            return;
-          }
-
-          setScanningIndianPlate(true);
-          setIndianPlateToast("🔍 Scanning vehicle for Indian number plate...");
-
-          try {
-            const selected = latest.result.tracks.find(
-              (t) => t.trackId === selectedTrackId,
-            );
-            const res = await scanIndianPlateFromCanvas(
-              latest.canvas,
-              selected?.bbox,
-            );
-
-            if (res.success && res.plate) {
-              setIndianPlateResults((prev) => {
-                const next = new Map(prev);
-                next.set(selectedTrackId, {
-                  text: res.plate!.formatted,
-                  detail: `${res.plate!.stateName} (${res.plate!.rtoLocation})`,
-                  confidence: res.confidence,
-                });
-                return next;
-              });
-
-              store.save(
-                latest.result,
-                latest.policy,
-                latest.jpeg,
-                "observation",
-                selectedTrackId,
-                undefined,
-                undefined,
-                {
-                  plateStatus: "read",
-                  plateText: res.plate.formatted,
-                  plateConfidence: res.confidence,
-                  plateSupportingFrames: 1,
-                  plateDetectorConfidence: res.confidence,
-                },
-              );
-
-              setIndianPlateToast(
-                `🇮🇳 Plate Detected: ${res.plate.formatted} · ${res.plate.stateName} (${res.plate.rtoLocation})`,
-              );
-            } else {
-              setIndianPlateToast(
-                res.error ?? "Could not clearly detect an Indian number plate in this crop.",
-              );
-            }
-          } catch {
-            setIndianPlateToast("Plate scanner encountered a temporary error.");
-          } finally {
-            setScanningIndianPlate(false);
-            setTimeout(() => setIndianPlateToast(null), 6000);
-          }
-        }}
+        onScanIndianPlate={() => void handleScanIndianPlate(selectedTrackId)}
         isScanningIndianPlate={scanningIndianPlate}
         indianPlateResult={selectedTrackId !== null ? (indianPlateResults.get(selectedTrackId)?.text ?? null) : null}
         indianPlateDetail={selectedTrackId !== null ? (indianPlateResults.get(selectedTrackId)?.detail ?? null) : null}
@@ -1334,6 +1384,18 @@ export default function Camera() {
               : status === "Paused"
                 ? "Resume camera"
                 : "Start camera"}
+          </button>
+          <button
+            type="button"
+            className="indian-plate-main-btn"
+            data-testid="main-scan-indian-plate-btn"
+            onClick={() => void handleScanIndianPlate()}
+            disabled={scanningIndianPlate}
+            title="Scan Indian number plate from current vehicle or camera frame"
+          >
+            {scanningIndianPlate
+              ? "🔍 Scanning Indian Plate..."
+              : "🇮🇳 Scan Indian Number Plate"}
           </button>
           <button
             className={`auto-scan-toggle ${autoScanEnabled ? "active" : ""}`}

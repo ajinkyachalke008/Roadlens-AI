@@ -393,6 +393,15 @@ export function Stage({
             📍 {gpsLocation.formattedDms} (±{gpsLocation.coordinates.accuracyM}m)
           </span>
         )}
+        {frame && frame.result.tracks.some((t) => ["car", "truck", "bus", "motorcycle"].includes(t.className)) && (
+          <span
+            className="stage-vehicles-badge"
+            data-testid="stage-vehicles-badge"
+            title="Vehicles in view: Click 'Scan Indian Number Plate' below or tap vehicle to inspect"
+          >
+            🚗 {frame.result.tracks.filter((t) => ["car", "truck", "bus", "motorcycle"].includes(t.className)).length} vehicle(s) in view
+          </span>
+        )}
         <span>{status}</span>
       </div>
       <div className="stage-view" ref={view} data-live="false">

@@ -30,6 +30,8 @@ import type { FrameRateChoice } from "../camera/frameRate";
 import { Reports } from "../components/Reports";
 import { Drawer } from "../components/Drawer";
 import { AnalyticsDrawer } from "../components/AnalyticsDrawer";
+import { DiagnosticsDrawer } from "../components/DiagnosticsDrawer";
+import { diagnostics } from "../diagnostics/diagnosticsService";
 import { CalibrationDrawer } from "../components/CalibrationDrawer";
 import { calibrationQuality } from "../geometry/calibration";
 import { SpeedValidationDrawer } from "../components/SpeedValidationDrawer";
@@ -120,7 +122,7 @@ export default function Camera() {
   const [viewers, setViewers] = useState(0);
   const [remaining, setRemaining] = useState<number | null>(null);
   const [drawer, setDrawer] = useState<
-    "settings" | "calibration" | "validation" | "end" | "analytics" | null
+    "settings" | "calibration" | "validation" | "end" | "analytics" | "diagnostics" | null
   >(null);
   const [selectedDossierVehicle, setSelectedDossierVehicle] = useState<string | null>(null);
   // Session-scoped, RAM-only, cleared with everything else at End session.
@@ -449,6 +451,26 @@ export default function Camera() {
       setStatus(s);
       statusRef.current = s;
       cameraStatus(s);
+      if (s === "Running") {
+        diagnostics.updateSubsystem("camera", {
+          status: "healthy",
+          summary: "Live video capture active",
+          metrics: {
+            Status: "Streaming",
+            Resolution: `${video.current?.videoWidth || 1280}x${video.current?.videoHeight || 720}`,
+            FPS: previewHz || 30,
+            "Source Device": "Camera / Stream",
+          },
+        });
+        diagnostics.log("camera", "info", "Camera capture stream started successfully.");
+      } else if (s === "Paused" || s === "Ended") {
+        diagnostics.updateSubsystem("camera", {
+          status: s === "Paused" ? "warning" : "idle",
+          summary: `Camera capture ${s.toLowerCase()}`,
+          metrics: { Status: s, Resolution: "Inactive", FPS: 0 },
+        });
+        diagnostics.log("camera", "info", `Camera capture state changed to ${s}.`);
+      }
       if (s === "Paused") {
         setFrame(null);
         setCalibrationStatus("Paused · measurement reset");
@@ -1358,6 +1380,16 @@ export default function Camera() {
           >
             {modeLabel}
           </span>
+          <button
+            type="button"
+            className="badge diagnostics-trigger-badge"
+            data-testid="diagnostics-trigger"
+            title="Open Live System Health & Diagnostics HUD"
+            style={{ cursor: "pointer", border: "none", font: "inherit" }}
+            onClick={() => setDrawer("diagnostics")}
+          >
+            🛠️ System Health
+          </button>
           <button
             type="button"
             className={`badge auto-scan-badge ${autoScanEnabled ? "active auto-scan-active-badge" : ""}`}
@@ -2391,6 +2423,9 @@ export default function Camera() {
           reports={Array.from(store.reports.values())}
           onClose={() => setDrawer(null)}
         />
+      )}
+      {drawer === "diagnostics" && (
+        <DiagnosticsDrawer onClose={() => setDrawer(null)} />
       )}
       {chatOpen && (
         <ForensicChatDrawer

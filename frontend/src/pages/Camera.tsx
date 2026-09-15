@@ -32,6 +32,11 @@ import { Drawer } from "../components/Drawer";
 import { AnalyticsDrawer } from "../components/AnalyticsDrawer";
 import { DiagnosticsDrawer } from "../components/DiagnosticsDrawer";
 import { diagnostics } from "../diagnostics/diagnosticsService";
+import { HotlistDrawer } from "../components/HotlistDrawer";
+import { hotlist } from "../hotlist/hotlistService";
+import type { HotlistAlertHit } from "../../../shared/src/hotlistTypes";
+import { speech } from "../voice/speechService";
+import { routeVoiceTranscript } from "../voice/voiceCommandRouter";
 import { CalibrationDrawer } from "../components/CalibrationDrawer";
 import { calibrationQuality } from "../geometry/calibration";
 import { SpeedValidationDrawer } from "../components/SpeedValidationDrawer";
@@ -122,9 +127,15 @@ export default function Camera() {
   const [viewers, setViewers] = useState(0);
   const [remaining, setRemaining] = useState<number | null>(null);
   const [drawer, setDrawer] = useState<
-    "settings" | "calibration" | "validation" | "end" | "analytics" | "diagnostics" | null
+    "settings" | "calibration" | "validation" | "end" | "analytics" | "diagnostics" | "hotlist" | null
   >(null);
   const [selectedDossierVehicle, setSelectedDossierVehicle] = useState<string | null>(null);
+  const [activeAlertHit, setActiveAlertHit] = useState<HotlistAlertHit | null>(null);
+  const [hotlistHitCount, setHotlistHitCount] = useState<number>(() =>
+    hotlist.getHits().filter((h) => !h.acknowledged).length
+  );
+  const [isVoiceListening, setIsVoiceListening] = useState(false);
+  const [voiceToast, setVoiceToast] = useState<string | null>(null);
   // Session-scoped, RAM-only, cleared with everything else at End session.
   const validation = useRef(new SpeedValidationSession());
   /**
@@ -1343,13 +1354,130 @@ export default function Camera() {
     return list;
   }, [store.reports, revision, frame, indianPlateResults, vehicleColorsRev]);
 
+  const handleSelectReport = (reportId: string) => {
+    const rep = store.reports.get(reportId);
+    if (rep) {
+      const blob = rep.evidenceId ? store.image(rep.evidenceId) : null;
+      const imgUrl = blob ? URL.createObjectURL(blob) : undefined;
+      const flags = rep.trackId !== null ? twoWheelerFlagsMap.current.get(rep.trackId) : undefined;
+      const geoObj = gpsLocation
+        ? {
+            latitude: gpsLocation.coordinates.latitude,
+            longitude: gpsLocation.coordinates.longitude,
+            accuracyM: gpsLocation.coordinates.accuracyM,
+            formattedDms: gpsLocation.formattedDms,
+            mapUrl: gpsLocation.mapUrl,
+            landmark: gpsLocation.landmark,
+          }
+        : undefined;
+      const notice = createEChallanFromReport(
+        rep,
+        { event: imgUrl },
+        gpsLocation?.landmark ?? "National Highway / Urban Corridor · Sector 4",
+        geoObj,
+        flags,
+      );
+      setSelectedChallan(notice);
+    }
+  };
+
+  const handleToggleVoiceControl = () => {
+    if (isVoiceListening) {
+      speech.stopListening();
+      setIsVoiceListening(false);
+      setVoiceToast(null);
+      return;
+    }
+
+    if (!speech.isSupported()) {
+      setVoiceToast("Microphone / Web Speech API is not supported on this browser.");
+      setTimeout(() => setVoiceToast(null), 3500);
+      return;
+    }
+
+    setIsVoiceListening(true);
+    setVoiceToast("Listening... (e.g. 'scan plate', 'auto scan', 'hotlist', 'diagnostics')");
+
+    speech.startListening({
+      lang: "en-IN",
+      onInterim: (text) => {
+        setVoiceToast(`Listening: "${text}"`);
+      },
+      onFinal: (text) => {
+        setIsVoiceListening(false);
+        const parsed = routeVoiceTranscript(text);
+        if (parsed.type === "command") {
+          setVoiceToast(`Command: ${parsed.action?.replace("_", " ").toUpperCase()}`);
+          setTimeout(() => setVoiceToast(null), 2500);
+
+          if (parsed.action === "scan_plate") {
+            void handleScanIndianPlate();
+          } else if (parsed.action === "toggle_autoscan") {
+            setAutoScanEnabled((prev) => !prev);
+          } else if (parsed.action === "open_hotlist") {
+            setDrawer("hotlist");
+          } else if (parsed.action === "open_diagnostics") {
+            setDrawer("diagnostics");
+          } else if (parsed.action === "open_forensics") {
+            setChatOpen(true);
+          } else if (parsed.action === "close_drawer") {
+            setDrawer(null);
+            setChatOpen(false);
+          }
+        } else {
+          setVoiceToast(`Searching: "${parsed.query}"`);
+          setTimeout(() => setVoiceToast(null), 2500);
+          setChatOpen(true);
+        }
+      },
+      onError: (err) => {
+        setIsVoiceListening(false);
+        setVoiceToast(`Voice error: ${err}`);
+        setTimeout(() => setVoiceToast(null), 3000);
+      },
+      onEnd: () => {
+        setIsVoiceListening(false);
+      },
+    });
+  };
+
   useEffect(() => {
     if (queryRecords.length === 0) return;
     for (const r of queryRecords.slice(0, 20)) {
       const obs = recordToObservation(r);
       saveObservation(obs).catch(() => {});
+
+      const hit = hotlist.checkObservation({
+        trackId: r.trackId ?? null,
+        plateText: r.plateText ?? null,
+        vehicleClass: r.className,
+        speedKmh: r.speedKmh ?? null,
+        isSpeeding: r.isSpeeding,
+        violations: r.violations,
+        gps: gpsLocation
+          ? {
+              latitude: gpsLocation.coordinates.latitude,
+              longitude: gpsLocation.coordinates.longitude,
+              formattedLocation: gpsLocation.landmark,
+            }
+          : null,
+        reportId: r.reportId,
+      });
+
+      if (hit) {
+        setActiveAlertHit(hit);
+        setHotlistHitCount(hotlist.getHits().filter((h) => !h.acknowledged).length);
+      }
     }
-  }, [queryRecords]);
+  }, [queryRecords, gpsLocation]);
+
+  useEffect(() => {
+    const unsub = hotlist.subscribe((hit) => {
+      setActiveAlertHit(hit);
+      setHotlistHitCount(hotlist.getHits().filter((h) => !h.acknowledged).length);
+    });
+    return () => unsub();
+  }, []);
 
   return (
     <>
@@ -1389,6 +1517,26 @@ export default function Camera() {
             onClick={() => setDrawer("diagnostics")}
           >
             🛠️ System Health
+          </button>
+          <button
+            type="button"
+            className={`badge hotlist-trigger-badge ${hotlistHitCount > 0 ? "hotlist-alert-active" : ""}`}
+            data-testid="hotlist-trigger"
+            title="Open Real-Time BOLO Hotlist & Enforcement Alarms"
+            style={{ cursor: "pointer", border: "none", font: "inherit" }}
+            onClick={() => setDrawer("hotlist")}
+          >
+            🚨 Hotlist {hotlistHitCount > 0 ? `(${hotlistHitCount})` : ""}
+          </button>
+          <button
+            type="button"
+            className={`badge voice-control-badge ${isVoiceListening ? "voice-listening-active" : ""}`}
+            data-testid="voice-control-trigger"
+            title={isVoiceListening ? "Voice command active... speak now" : "Click to activate hands-free Voice Control"}
+            style={{ cursor: "pointer", border: "none", font: "inherit" }}
+            onClick={handleToggleVoiceControl}
+          >
+            {isVoiceListening ? "🔴 Listening..." : "🎙️ Voice"}
           </button>
           <button
             type="button"
@@ -1453,6 +1601,70 @@ export default function Camera() {
           </button>
         </div>
       </div>
+      {activeAlertHit && (
+        <div
+          className={`hotlist-alert-banner ${activeAlertHit.category}`}
+          role="alert"
+          data-testid="hotlist-alert-banner"
+        >
+          <div className="alert-banner-left">
+            <span className="alert-siren-icon" aria-hidden="true">🚨</span>
+            <div className="alert-banner-content">
+              <div className="alert-headline">
+                <span className="alert-category-tag">
+                  {activeAlertHit.category.toUpperCase()} ALERT
+                </span>
+                {activeAlertHit.plateText && (
+                  <span className="alert-plate-badge">
+                    <span className="ind-code">IND</span>
+                    <strong>{activeAlertHit.plateText}</strong>
+                  </span>
+                )}
+                {activeAlertHit.speedKmh != null && (
+                  <span className="alert-speed-pill">
+                    ⚡ {activeAlertHit.speedKmh} km/h
+                  </span>
+                )}
+              </div>
+              <p className="alert-reason-text">{activeAlertHit.matchedReason}</p>
+            </div>
+          </div>
+          <div className="alert-banner-actions">
+            {activeAlertHit.plateText && (
+              <button
+                type="button"
+                className="alert-action-btn dossier"
+                onClick={() => setSelectedDossierVehicle(activeAlertHit.plateText)}
+              >
+                🗺️ Dossier
+              </button>
+            )}
+            {activeAlertHit.reportId && (
+              <button
+                type="button"
+                className="alert-action-btn challan"
+                onClick={() => handleSelectReport(activeAlertHit.reportId!)}
+              >
+                📄 e-Challan
+              </button>
+            )}
+            <button
+              type="button"
+              className="alert-action-btn dismiss"
+              onClick={() => setActiveAlertHit(null)}
+              aria-label="Dismiss Alert"
+            >
+              ✕
+            </button>
+          </div>
+        </div>
+      )}
+      {voiceToast && (
+        <div className="voice-floating-toast" data-testid="voice-floating-toast">
+          <span className="voice-pulse-icon">🎙️</span>
+          <span>{voiceToast}</span>
+        </div>
+      )}
       <Stage
         frame={frame}
         status={status}
@@ -2427,6 +2639,19 @@ export default function Camera() {
       {drawer === "diagnostics" && (
         <DiagnosticsDrawer onClose={() => setDrawer(null)} />
       )}
+      {drawer === "hotlist" && (
+        <HotlistDrawer
+          onClose={() => setDrawer(null)}
+          onViewDossier={(vehId) => {
+            setDrawer(null);
+            setSelectedDossierVehicle(vehId);
+          }}
+          onIssueChallan={(reportId) => {
+            setDrawer(null);
+            handleSelectReport(reportId);
+          }}
+        />
+      )}
       {chatOpen && (
         <ForensicChatDrawer
           records={queryRecords}
@@ -2436,30 +2661,7 @@ export default function Camera() {
             setSelectedDossierVehicle(vehId);
           }}
           onSelectReport={(reportId) => {
-            const rep = store.reports.get(reportId);
-            if (rep) {
-              const blob = rep.evidenceId ? store.image(rep.evidenceId) : null;
-              const imgUrl = blob ? URL.createObjectURL(blob) : undefined;
-              const flags = rep.trackId !== null ? twoWheelerFlagsMap.current.get(rep.trackId) : undefined;
-              const geoObj = gpsLocation
-                ? {
-                    latitude: gpsLocation.coordinates.latitude,
-                    longitude: gpsLocation.coordinates.longitude,
-                    accuracyM: gpsLocation.coordinates.accuracyM,
-                    formattedDms: gpsLocation.formattedDms,
-                    mapUrl: gpsLocation.mapUrl,
-                    landmark: gpsLocation.landmark,
-                  }
-                : undefined;
-              const notice = createEChallanFromReport(
-                rep,
-                { event: imgUrl },
-                gpsLocation?.landmark ?? "National Highway / Urban Corridor · Sector 4",
-                geoObj,
-                flags,
-              );
-              setSelectedChallan(notice);
-            }
+            handleSelectReport(reportId);
           }}
         />
       )}

@@ -5,6 +5,7 @@ import {
 } from "../ai/trafficQueryEngine";
 import type { ForensicSearchResponse, AmbiguityClarification } from "../../../shared/src/forensicTypes";
 import { searchForensics, checkBackendHealth } from "../api/forensicsClient";
+import { speech } from "../voice/speechService";
 
 export interface ChatMessage {
   id: string;
@@ -100,8 +101,48 @@ export function ForensicChatDrawer({
   ]);
   const [inputText, setInputText] = useState("");
   const [isProcessing, setIsProcessing] = useState(false);
+  const [isListening, setIsListening] = useState(false);
+  const [voiceToast, setVoiceToast] = useState<string | null>(null);
   const messagesEndRef = useRef<HTMLDivElement | null>(null);
   const inputRef = useRef<HTMLInputElement | null>(null);
+
+  const toggleVoiceSearch = () => {
+    if (isListening) {
+      speech.stopListening();
+      setIsListening(false);
+      return;
+    }
+
+    if (!speech.isSupported()) {
+      setVoiceToast("Microphone / Web Speech API is not supported on this browser.");
+      setTimeout(() => setVoiceToast(null), 3000);
+      return;
+    }
+
+    setIsListening(true);
+    setVoiceToast("Listening... speak your search query");
+
+    speech.startListening({
+      lang: "en-IN",
+      onInterim: (text) => {
+        setInputText(text);
+      },
+      onFinal: (text) => {
+        setInputText(text);
+        setIsListening(false);
+        setVoiceToast(null);
+        void handleSend(text);
+      },
+      onError: (err) => {
+        setIsListening(false);
+        setVoiceToast(`Speech error: ${err}`);
+        setTimeout(() => setVoiceToast(null), 3000);
+      },
+      onEnd: () => {
+        setIsListening(false);
+      },
+    });
+  };
 
   useEffect(() => {
     checkBackendHealth().then((online) => setIsEnterpriseOnline(online));
@@ -274,6 +315,8 @@ export function ForensicChatDrawer({
         <div ref={messagesEndRef} />
       </div>
 
+      {voiceToast && <div className="voice-feedback-toast">{voiceToast}</div>}
+
       <form
         className="forensic-chat-input-bar"
         onSubmit={(e) => {
@@ -281,12 +324,21 @@ export function ForensicChatDrawer({
           handleSend();
         }}
       >
+        <button
+          type="button"
+          className={`voice-mic-btn ${isListening ? "listening active" : ""}`}
+          onClick={toggleVoiceSearch}
+          title={isListening ? "Listening... click to stop" : "Speak natural language query hands-free"}
+          aria-label="Voice search hands-free"
+        >
+          {isListening ? "🔴" : "🎙️"}
+        </button>
         <input
           ref={inputRef}
           type="text"
           value={inputText}
           onChange={(e) => setInputText(e.target.value)}
-          placeholder="Ask RoadLens AI (e.g. 'Find all red cars and their number plate')..."
+          placeholder={isListening ? "Listening... speak now" : "Ask RoadLens AI (e.g. 'Find all red cars and their number plate')..."}
           aria-label="Query traffic records"
           disabled={isProcessing}
         />

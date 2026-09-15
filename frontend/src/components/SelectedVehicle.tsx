@@ -34,6 +34,7 @@ export interface SelectedVehicleProps {
   indianPlateResult?: string | null;
   indianPlateDetail?: string | null;
   twoWheelerResult?: TwoWheelerAnalysisResult | null;
+  colorResult?: { name: string; hex: string } | null;
 }
 
 const MOTION: Record<string, string> = {
@@ -96,6 +97,7 @@ export function SelectedVehicle({
   indianPlateResult = null,
   indianPlateDetail = null,
   twoWheelerResult = null,
+  colorResult = null,
 }: SelectedVehicleProps) {
   if (!track && !lost) return null;
   const over =
@@ -145,6 +147,26 @@ export function SelectedVehicle({
                 {MOTION[track.motion ?? "unknown"]}
               </dd>
             </div>
+            {colorResult && (
+              <div>
+                <dt>Color</dt>
+                <dd data-testid="selected-color">
+                  <span
+                    className="vehicle-color-pill"
+                    style={{
+                      borderColor: colorResult.hex,
+                      backgroundColor: `${colorResult.hex}18`,
+                    }}
+                  >
+                    <i
+                      className="color-dot"
+                      style={{ backgroundColor: colorResult.hex }}
+                    />
+                    {colorResult.name}
+                  </span>
+                </dd>
+              </div>
+            )}
             <div className="selected-speed">
               <dt>Speed</dt>
               <dd data-testid="selected-speed">

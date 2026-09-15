@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import {
   CameraCapture,
   newPolicy,
@@ -65,6 +65,16 @@ import {
   analyzeTwoWheelerViolations,
   type TwoWheelerAnalysisResult,
 } from "../violations/twoWheelerAnalyzer";
+import {
+  detectDominantColor,
+  type VehicleColorResult,
+} from "../vision/colorDetector";
+import { ForensicChatDrawer } from "../components/ForensicChatDrawer";
+import type { VehicleRecord } from "../ai/trafficQueryEngine";
+import { parseIndianPlate } from "../../../shared/src/indianPlates";
+import { ChallanModal } from "../components/ChallanModal";
+import { createEChallanFromReport, type EChallanNotice } from "../challan/challanGenerator";
+
 export default function Camera() {
   const video = useRef<HTMLVideoElement>(null);
   const capture = useRef<CameraCapture | null>(null);
@@ -89,6 +99,10 @@ export default function Camera() {
   const twoWheelerResultsRef = useRef<Map<number, TwoWheelerAnalysisResult>>(new Map());
   const twoWheelerFlagsMap = useRef<Map<number, { isTripleRiding?: boolean; hasNoHelmet?: boolean }>>(new Map());
   const [twoWheelerTags, setTwoWheelerTags] = useState<Map<number, string>>(new Map());
+  const [chatOpen, setChatOpen] = useState(false);
+  const [selectedChallan, setSelectedChallan] = useState<EChallanNotice | null>(null);
+  const vehicleColorsRef = useRef<Map<string | number, VehicleColorResult>>(new Map());
+  const [vehicleColorsRev, setVehicleColorsRev] = useState(0);
 
   useEffect(() => {
     getCurrentGeoLocation().then((loc) => {
@@ -210,7 +224,7 @@ export default function Camera() {
 
       setAutoScanCount(autoScanner.scannedCount);
 
-      store.save(
+      const savedReport = store.save(
         completed.result,
         completed.policy,
         completed.jpeg,
@@ -226,6 +240,10 @@ export default function Camera() {
           plateDetectorConfidence: scanResult.confidence,
         },
       );
+      if (savedReport) {
+        const color = vehicleColorsRef.current.get(track.trackId) ?? detectDominantColor(completed.canvas, track.bbox);
+        vehicleColorsRef.current.set(savedReport.reportId, color);
+      }
 
       if (autoScanToastTimer.current) {
         window.clearTimeout(autoScanToastTimer.current);
@@ -459,6 +477,14 @@ export default function Camera() {
       let tagsChanged = false;
       const currentTags = new Map(twoWheelerTags);
       for (const track of completed.result.tracks) {
+        if (
+          ["car", "truck", "bus", "motorcycle"].includes(track.className) &&
+          !vehicleColorsRef.current.has(track.trackId)
+        ) {
+          const col = detectDominantColor(completed.canvas, track.bbox);
+          vehicleColorsRef.current.set(track.trackId, col);
+          tagsChanged = true;
+        }
         if (track.className === "motorcycle") {
           const res = analyzeTwoWheelerViolations(track, completed.result.tracks);
           twoWheelerResultsRef.current.set(track.trackId, res);
@@ -485,6 +511,7 @@ export default function Camera() {
       }
       if (tagsChanged) {
         setTwoWheelerTags(currentTags);
+        setVehicleColorsRev((v) => v + 1);
       }
       plates.observe(completed.result, completed.canvas, c.remote);
       flushPlates();
@@ -1189,7 +1216,7 @@ export default function Camera() {
           });
         }
 
-        store.save(
+        const savedRep = store.save(
           latest.result,
           latest.policy,
           latest.jpeg,
@@ -1205,6 +1232,10 @@ export default function Camera() {
             plateDetectorConfidence: res.confidence,
           },
         );
+        if (savedRep && targetTrack) {
+          const col = vehicleColorsRef.current.get(effectiveId!) ?? detectDominantColor(latest.canvas, targetTrack.bbox);
+          vehicleColorsRef.current.set(savedRep.reportId, col);
+        }
 
         setIndianPlateToast(
           `🇮🇳 Plate Detected: ${res.plate.formatted} · ${res.plate.stateName} (${res.plate.rtoLocation})`,
@@ -1222,6 +1253,70 @@ export default function Camera() {
       setTimeout(() => setIndianPlateToast(null), 6000);
     }
   };
+
+  const queryRecords: VehicleRecord[] = useMemo(() => {
+    const list: VehicleRecord[] = [];
+    for (const r of store.reports.values()) {
+      const col =
+        vehicleColorsRef.current.get(r.reportId) ??
+        (r.trackId !== null ? vehicleColorsRef.current.get(r.trackId) : null) ?? {
+          name: "Silver",
+          hex: "#94a3b8",
+          emoji: "🔘",
+          confidence: 0.7,
+        };
+      const indian = r.plateText ? parseIndianPlate(r.plateText) : null;
+      const imageBlob = r.evidenceId ? store.image(r.evidenceId) : null;
+
+      list.push({
+        id: r.reportId,
+        reportId: r.reportId,
+        trackId: r.trackId,
+        className: r.className ?? "vehicle",
+        color: col,
+        plateText: r.plateText ?? null,
+        rtoLocation: indian?.rtoLocation ?? null,
+        stateName: indian?.stateName ?? null,
+        speedMps: r.speedMps,
+        speedKmh: r.speedMps != null ? Math.round(r.speedMps * 3.6) : null,
+        isSpeeding: r.kind === "speed_candidate",
+        timestamp: r.capturedAtIso,
+        sourceMode: r.sourceMode,
+        thumbnailBlob: imageBlob,
+      });
+    }
+
+    if (frame?.result?.tracks) {
+      for (const track of frame.result.tracks) {
+        if (!track.observed || list.some((item) => item.trackId === track.trackId)) continue;
+        const col = vehicleColorsRef.current.get(track.trackId) ?? {
+          name: "Silver",
+          hex: "#94a3b8",
+          emoji: "🔘",
+          confidence: 0.7,
+        };
+        const plate = indianPlateResults.get(track.trackId);
+        const twoWheeler = twoWheelerResultsRef.current.get(track.trackId);
+
+        list.push({
+          id: `live-${track.trackId}`,
+          trackId: track.trackId,
+          className: track.className,
+          color: col,
+          plateText: plate?.text ?? null,
+          rtoLocation: plate?.detail ?? null,
+          stateName: null,
+          speedMps: track.speedMps,
+          speedKmh: track.speedMps != null ? Math.round(track.speedMps * 3.6) : null,
+          isSpeeding: track.speedMps != null && track.speedMps * 3.6 > 50,
+          violations: twoWheeler?.violations?.map((v) => v.titleEn),
+          timestamp: new Date().toISOString(),
+        });
+      }
+    }
+
+    return list;
+  }, [store.reports, revision, frame, indianPlateResults, vehicleColorsRev]);
 
   return (
     <>
@@ -1355,13 +1450,17 @@ export default function Camera() {
         onSaveObservation={() => {
           const latest = capture.current?.latest;
           if (latest) {
-            store.save(
+            const savedRep = store.save(
               latest.result,
               latest.policy,
               latest.jpeg,
               "observation",
               selectedTrackId ?? undefined,
             );
+            if (savedRep && selectedTrack) {
+              const col = vehicleColorsRef.current.get(selectedTrack.trackId) ?? detectDominantColor(latest.canvas, selectedTrack.bbox);
+              vehicleColorsRef.current.set(savedRep.reportId, col);
+            }
             setCapturedToast(true);
             setTimeout(() => setCapturedToast(false), 3000);
           }
@@ -1370,6 +1469,7 @@ export default function Camera() {
         isScanningIndianPlate={scanningIndianPlate}
         indianPlateResult={selectedTrackId !== null ? (indianPlateResults.get(selectedTrackId)?.text ?? null) : null}
         indianPlateDetail={selectedTrackId !== null ? (indianPlateResults.get(selectedTrackId)?.detail ?? null) : null}
+        colorResult={selectedTrackId !== null ? (vehicleColorsRef.current.get(selectedTrackId) ?? null) : null}
       />
 
       <div className="controls">
@@ -1483,6 +1583,16 @@ export default function Camera() {
             title="View Traffic Flow Analytics, Vehicle Composition, and Speed Compliance"
           >
             📊 Analytics
+          </button>
+          <button
+            type="button"
+            className="forensic-chat-btn"
+            data-testid="open-forensic-chat-btn"
+            onClick={() => setChatOpen(true)}
+            title="AI Forensic Search: Search vehicles, colors, and number plates using plain English"
+          >
+            <span>🤖 AI Forensic Search</span>
+            <span className="forensic-badge-pill">Natural Language</span>
           </button>
         </div>
         <button onClick={() => setDrawer("settings")}>Settings</button>
@@ -2269,6 +2379,44 @@ export default function Camera() {
         <AnalyticsDrawer
           reports={Array.from(store.reports.values())}
           onClose={() => setDrawer(null)}
+        />
+      )}
+      {chatOpen && (
+        <ForensicChatDrawer
+          records={queryRecords}
+          onClose={() => setChatOpen(false)}
+          onSelectReport={(reportId) => {
+            const rep = store.reports.get(reportId);
+            if (rep) {
+              const blob = rep.evidenceId ? store.image(rep.evidenceId) : null;
+              const imgUrl = blob ? URL.createObjectURL(blob) : undefined;
+              const flags = rep.trackId !== null ? twoWheelerFlagsMap.current.get(rep.trackId) : undefined;
+              const geoObj = gpsLocation
+                ? {
+                    latitude: gpsLocation.coordinates.latitude,
+                    longitude: gpsLocation.coordinates.longitude,
+                    accuracyM: gpsLocation.coordinates.accuracyM,
+                    formattedDms: gpsLocation.formattedDms,
+                    mapUrl: gpsLocation.mapUrl,
+                    landmark: gpsLocation.landmark,
+                  }
+                : undefined;
+              const notice = createEChallanFromReport(
+                rep,
+                { event: imgUrl },
+                gpsLocation?.landmark ?? "National Highway / Urban Corridor · Sector 4",
+                geoObj,
+                flags,
+              );
+              setSelectedChallan(notice);
+            }
+          }}
+        />
+      )}
+      {selectedChallan && (
+        <ChallanModal
+          challan={selectedChallan}
+          onClose={() => setSelectedChallan(null)}
         />
       )}
     </>

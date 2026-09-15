@@ -121,6 +121,7 @@ export interface ParsedIndianPlate {
   rawNormalized: string;
   stateCode?: string;
   stateName?: string;
+  districtCode?: string;
   rtoCode?: string;
   rtoLocation?: string;
   series?: string;
@@ -182,6 +183,7 @@ export function parseIndianPlate(rawInput: string): ParsedIndianPlate | null {
       rawNormalized: clean,
       stateCode: "BH",
       stateName: "All India (Bharat Series)",
+      districtCode: undefined,
       rtoCode: "BH",
       rtoLocation: `Registered in 20${year}`,
       series,
@@ -213,6 +215,7 @@ export function parseIndianPlate(rawInput: string): ParsedIndianPlate | null {
           rawNormalized: match[0],
           stateCode: "BH",
           stateName: "All India (Bharat Series)",
+          districtCode: undefined,
           rtoCode: "BH",
           rtoLocation: `Registered in 20${match[1]}`,
           series: match[4],
@@ -226,13 +229,17 @@ export function parseIndianPlate(rawInput: string): ParsedIndianPlate | null {
 
   // Next 1 or 2 characters must be digits (RTO code)
   chars[2] = correctDigit(chars[2]);
+  if (!/^\d$/.test(chars[2])) return null;
   let rtoDigits = chars[2];
   let remainderIdx = 3;
 
-  if (chars.length >= 8 && /[0-9OIZSB]/.test(chars[3])) {
-    chars[3] = correctDigit(chars[3]);
-    rtoDigits += chars[3];
-    remainderIdx = 4;
+  if (chars.length >= 8 && /[0-9OIZSBG]/.test(chars[3])) {
+    const nextDigit = correctDigit(chars[3]);
+    if (/^\d$/.test(nextDigit)) {
+      chars[3] = nextDigit;
+      rtoDigits += nextDigit;
+      remainderIdx = 4;
+    }
   }
 
   const rtoKey = `${stateCodeCandidate}${rtoDigits.padStart(2, "0")}`;
@@ -263,6 +270,7 @@ export function parseIndianPlate(rawInput: string): ParsedIndianPlate | null {
     rawNormalized: normalized,
     stateCode: stateCodeCandidate,
     stateName: INDIAN_STATES[stateCodeCandidate],
+    districtCode: rtoDigits,
     rtoCode: rtoKey,
     rtoLocation: COMMON_INDIAN_RTOS[rtoKey] ?? `${INDIAN_STATES[stateCodeCandidate]} RTO ${rtoDigits}`,
     series: series || undefined,

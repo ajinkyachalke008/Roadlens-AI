@@ -241,4 +241,88 @@ describe("AutoPlateScanner", () => {
     expect(scanner.scannedCount).toBe(0);
     expect(scanner.isTrackScanned(30)).toBe(false);
   });
+
+  it("prioritizes the largest/closest vehicle when multiple vehicles appear", async () => {
+    const scanner = new AutoPlateScanner();
+    scanner.minIntervalMs = 0;
+    scanner.enabled = true;
+
+    // Small vehicle in background (0.1 x 0.1 area)
+    const farVehicle = makeTrack({
+      trackId: 41,
+      className: "car",
+      bbox: [0.1, 0.1, 0.25, 0.25],
+    });
+
+    // Large vehicle in foreground (0.4 x 0.4 area)
+    const closeVehicle = makeTrack({
+      trackId: 42,
+      className: "truck",
+      bbox: [0.3, 0.3, 0.7, 0.7],
+    });
+
+    const detected = vi.fn();
+    scanner.onPlateDetected = detected;
+
+    await scanner.processFrame(makeMockFrame([farVehicle, closeVehicle]));
+
+    expect(detected).toHaveBeenCalledTimes(1);
+    expect(detected.mock.calls[0][0].track.trackId).toBe(42);
+  });
+
+  it("recovers gracefully and releases busy state if OCR throws", async () => {
+    const scanner = new AutoPlateScanner();
+    scanner.minIntervalMs = 0;
+    scanner.enabled = true;
+
+    const { scanIndianPlateFromCanvas } = await import(
+      "../../frontend/src/plates/indianPlateScanner"
+    );
+    const mockScan = vi.mocked(scanIndianPlateFromCanvas);
+    mockScan.mockRejectedValueOnce(new Error("WASM Out of Memory"));
+
+    const track = makeTrack({
+      trackId: 50,
+      className: "car",
+      bbox: [0.2, 0.2, 0.6, 0.6],
+    });
+
+    // First attempt fails with rejection
+    await scanner.processFrame(makeMockFrame([track]));
+
+    // Second frame should not be stuck busy and can succeed
+    const detected = vi.fn();
+    scanner.onPlateDetected = detected;
+    await scanner.processFrame(makeMockFrame([track]));
+
+    expect(detected).toHaveBeenCalledTimes(1);
+    expect(detected.mock.calls[0][0].track.trackId).toBe(50);
+  });
+
+  it("scans consecutive passing vehicles and increments total count", async () => {
+    const scanner = new AutoPlateScanner();
+    scanner.minIntervalMs = 0;
+    scanner.enabled = true;
+
+    const car1 = makeTrack({
+      trackId: 101,
+      className: "car",
+      bbox: [0.2, 0.2, 0.6, 0.6],
+    });
+    const car2 = makeTrack({
+      trackId: 102,
+      className: "car",
+      bbox: [0.3, 0.3, 0.7, 0.7],
+    });
+
+    const detected = vi.fn();
+    scanner.onPlateDetected = detected;
+
+    await scanner.processFrame(makeMockFrame([car1]));
+    expect(scanner.scannedCount).toBe(1);
+
+    await scanner.processFrame(makeMockFrame([car2]));
+    expect(scanner.scannedCount).toBe(2);
+    expect(detected).toHaveBeenCalledTimes(2);
+  });
 });

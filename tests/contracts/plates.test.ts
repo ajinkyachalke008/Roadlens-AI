@@ -142,7 +142,14 @@ describe("Plate result contract", () => {
     ).toThrow();
   });
   it("refuses readings outside the permitted plate alphabet", () => {
-    for (const text of ["abc1234", "AB!123", "", "A", "ABCDEFGHIJK", " AB12"])
+    for (const text of [
+      "abc1234",
+      "AB!123",
+      "",
+      "A",
+      "A".repeat(PLATE_LIMITS.maxTextLength + 1),
+      " AB12",
+    ])
       expect(() => PlateTextSchema.parse(text)).toThrow();
     for (const text of ["ABC1234", "7ABC123", "AB-1234", "1A 2B3"])
       expect(PlateTextSchema.parse(text)).toBe(text);

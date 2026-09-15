@@ -51,12 +51,24 @@ import {
   type ShowcaseState,
 } from "../showcase/controller";
 import { scanIndianPlateFromCanvas } from "../plates/indianPlateScanner";
+import {
+  AutoPlateScanner,
+  type AutoScanTriggerMode,
+} from "../plates/autoScanner";
+import { playPlateChime } from "../plates/audioChime";
 export default function Camera() {
   const video = useRef<HTMLVideoElement>(null);
   const capture = useRef<CameraCapture | null>(null);
   const relay = useRef<RelayClient | null>(null);
   const roomRef = useRef<Room | null>(null);
   const store = useRef(new SessionStore()).current;
+  const autoScanner = useRef(new AutoPlateScanner()).current;
+  const [autoScanEnabled, setAutoScanEnabled] = useState(false);
+  const [autoScanTriggerMode, setAutoScanTriggerMode] =
+    useState<AutoScanTriggerMode>("all");
+  const [autoScanCount, setAutoScanCount] = useState(0);
+  const [autoScanToast, setAutoScanToast] = useState<string | null>(null);
+  const autoScanToastTimer = useRef<number | null>(null);
   const [revision, setRevision] = useState(0);
   const [frame, setFrame] = useState<DisplayFrame | null>(null);
   const [scanningIndianPlate, setScanningIndianPlate] = useState(false);
@@ -152,6 +164,59 @@ export default function Camera() {
   const lastCameraStatus = useRef("");
   const uploads = useRef<number[]>([]);
   const fileRef = useRef<HTMLInputElement>(null);
+
+  useEffect(() => {
+    autoScanner.enabled = autoScanEnabled;
+    autoScanner.triggerMode = autoScanTriggerMode;
+  }, [autoScanEnabled, autoScanTriggerMode, autoScanner]);
+
+  useEffect(() => {
+    autoScanner.onPlateDetected = (event) => {
+      const { track, scanResult, completed } = event;
+      if (!scanResult.plate) return;
+
+      playPlateChime();
+
+      setIndianPlateResults((prev) => {
+        const next = new Map(prev);
+        next.set(track.trackId, {
+          text: scanResult.plate!.formatted,
+          detail: `${scanResult.plate!.stateName} (${scanResult.plate!.rtoLocation})`,
+          confidence: scanResult.confidence,
+        });
+        return next;
+      });
+
+      setAutoScanCount(autoScanner.scannedCount);
+
+      store.save(
+        completed.result,
+        completed.policy,
+        completed.jpeg,
+        "observation",
+        track.trackId,
+        undefined,
+        undefined,
+        {
+          plateStatus: "read",
+          plateText: scanResult.plate.formatted,
+          plateConfidence: scanResult.confidence,
+          plateSupportingFrames: 1,
+          plateDetectorConfidence: scanResult.confidence,
+        },
+      );
+
+      if (autoScanToastTimer.current) {
+        window.clearTimeout(autoScanToastTimer.current);
+      }
+      setAutoScanToast(
+        `⚡ Auto-Scanned: ${scanResult.plate.formatted} · ${scanResult.plate.stateName} (${scanResult.plate.rtoLocation})`,
+      );
+      autoScanToastTimer.current = window.setTimeout(() => {
+        setAutoScanToast(null);
+      }, 5000);
+    };
+  }, [autoScanner, store]);
   function cameraStatus(state: string) {
     const c = capture.current;
     const key = state.startsWith("Loading") ? "Loading" : state;
@@ -370,6 +435,9 @@ export default function Camera() {
       handleShowcaseFrame(completed);
       plates.observe(completed.result, completed.canvas, c.remote);
       flushPlates();
+      if (autoScanner.enabled) {
+        void autoScanner.processFrame(completed);
+      }
       for (const candidate of completed.candidates) {
         const activeShowcase = showcase.snapshot();
         const showcaseReportId =
@@ -1036,6 +1104,15 @@ export default function Camera() {
           >
             {modeLabel}
           </span>
+          <span
+            className={`badge auto-scan-badge ${autoScanEnabled ? "active auto-scan-active-badge" : ""}`}
+            data-testid="auto-scan-badge"
+            title="Automatic Indian Plate Scanning (Hands-Free Mode)"
+          >
+            {autoScanEnabled
+              ? `⚡ Auto-Scan: ON (${autoScanCount})`
+              : "⚡ Auto-Scan: OFF"}
+          </span>
           <button
             type="button"
             role="switch"
@@ -1090,6 +1167,7 @@ export default function Camera() {
         onSelect={select}
         plateBox={selectedPlate?.plateBox ?? null}
         speedLimitMps={capture.current?.policy.speedLimitMps ?? null}
+        indianPlates={new Map(Array.from(indianPlateResults.entries()).map(([id, r]) => [id, r.text]))}
       />
       <SelectedVehicle
         track={selectedTrack}
@@ -1202,6 +1280,50 @@ export default function Camera() {
                 : "Start camera"}
           </button>
           <button
+            className={`auto-scan-toggle ${autoScanEnabled ? "active" : ""}`}
+            onClick={() => {
+              const next = !autoScanEnabled;
+              setAutoScanEnabled(next);
+              if (next) {
+                setAutoScanToast(
+                  "⚡ Hands-Free Auto-Scan activated! Indian plates will be scanned automatically as vehicles pass.",
+                );
+                if (autoScanToastTimer.current)
+                  window.clearTimeout(autoScanToastTimer.current);
+                autoScanToastTimer.current = window.setTimeout(
+                  () => setAutoScanToast(null),
+                  4000,
+                );
+              }
+            }}
+            title="Automatic Plate Scanning: Automatically crops and scans Indian number plates as vehicles pass or speed"
+          >
+            <i className="auto-scan-dot" />
+            <span>
+              {autoScanEnabled
+                ? "⚡ Auto-Scan: ON"
+                : "⚡ Hands-Free Auto-Scan"}
+            </span>
+            {autoScanCount > 0 && (
+              <span className="auto-scan-pill">{autoScanCount}</span>
+            )}
+          </button>
+          {autoScanEnabled && (
+            <button
+              className="trigger-mode-btn"
+              onClick={() =>
+                setAutoScanTriggerMode((m) =>
+                  m === "all" ? "speed_only" : "all",
+                )
+              }
+              title="Switch trigger mode: all passing vehicles vs speed violations only"
+            >
+              {autoScanTriggerMode === "all"
+                ? "🎯 All Vehicles"
+                : "🚨 Speeding Only"}
+            </button>
+          )}
+          <button
             className="capture-btn"
             onClick={() => {
               const latest = capture.current?.latest;
@@ -1239,6 +1361,11 @@ export default function Camera() {
         </div>
         <button onClick={() => setDrawer("settings")}>Settings</button>
       </div>
+      {autoScanToast && (
+        <div className="plate-toast-banner auto-scan-toast" role="status">
+          <span>{autoScanToast}</span>
+        </div>
+      )}
       {capturedToast && (
         <div className="capture-toast-banner" role="status">
           <span>📸 <strong>Snapshot & Report Saved!</strong> Image and detection saved to Reports below.</span>
@@ -1801,6 +1928,34 @@ export default function Camera() {
             Off by default. Up to 20 images and 8 MiB; older images are evicted.
             Shared frames pass through the relay.
           </p>
+          <hr />
+          <h3>🇮🇳 Hands-Free Indian Plate Auto-Scanner</h3>
+          <label className="check">
+            <input
+              type="checkbox"
+              checked={autoScanEnabled}
+              onChange={(e) => setAutoScanEnabled(e.target.checked)}
+            />
+            Enable Automatic Plate Scanning (Hands-Free)
+          </label>
+          <label>
+            Auto-scan trigger criteria
+            <select
+              value={autoScanTriggerMode}
+              disabled={!autoScanEnabled}
+              onChange={(e) =>
+                setAutoScanTriggerMode(
+                  e.target.value as AutoScanTriggerMode,
+                )
+              }
+            >
+              <option value="all">All passing vehicles</option>
+              <option value="speed_only">Speed limit violations only</option>
+            </select>
+          </label>
+          <p className="footnote">
+            Automatically isolates vehicle bumper crops, enhances plate contrast, and recognizes Indian registration numbers (including BH series) in the background with position-aware RTO verification.
+          </p>
           <button
             onClick={() => {
               setDrawer(null);
@@ -1943,6 +2098,9 @@ export default function Camera() {
               store.clear();
               plates.reset();
               plateReports.clear();
+              autoScanner.reset();
+              setIndianPlateResults(new Map());
+              setAutoScanCount(0);
               validation.current.clear();
               estimates.current = new Map();
               setValidationRevision(0);

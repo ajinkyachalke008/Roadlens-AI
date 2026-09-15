@@ -86,6 +86,11 @@ describe("overlay label", () => {
       "ACQUIRING · CAR · ID 9",
     );
   });
+  it("formats Indian license plate in the overlay label when provided", () => {
+    expect(
+      overlayLabel("car", 12, null, "km/h", null, false, true, "MH 12 AB 1234"),
+    ).toBe("CAR · ID 12 · 🇮🇳 MH 12 AB 1234");
+  });
 });
 
 describe("overlay color", () => {

@@ -66,8 +66,10 @@ export const overlayLabel = (
   overBy: number | null = null,
   showcase = false,
   showcaseAlert = true,
+  indianPlate?: string | null,
 ) =>
   `${showcase ? (showcaseAlert ? "TRAFFIC ALERT · " : "ACQUIRING · ") : ""}${className.toUpperCase()} · ID ${trackId}` +
+  (indianPlate ? ` · 🇮🇳 ${indianPlate}` : "") +
   (speedMps !== null ? ` · ${displaySpeed(speedMps, speedUnit)}` : "") +
   (speedMps !== null && overBy !== null && overBy > 0
     ? ` · +${displaySpeed(overBy, speedUnit)}`
@@ -92,6 +94,7 @@ function drawBoxes(
   showcaseAlert = true,
   plateBox: readonly [number, number, number, number] | null = null,
   overBy: (box: OverlayDrawBox) => number | null = () => null,
+  indianPlates?: Map<number, string> | null,
 ) {
   ctx.save();
   // Detections belong to the video content, never to the letterbox bars.
@@ -119,6 +122,7 @@ function drawBoxes(
     );
     ctx.strokeRect(x, y, width, height);
     ctx.lineWidth = Math.max(1.5, rect.width / 450);
+    const plateText = indianPlates?.get(box.trackId) ?? null;
     const label = overlayLabel(
       box.className,
       box.trackId,
@@ -127,6 +131,7 @@ function drawBoxes(
       overBy(box),
       showcase,
       showcaseAlert,
+      plateText,
     );
     const labelHeight = Math.max(20, rect.width / 40);
     const textWidth = ctx.measureText(label).width + 12;
@@ -188,6 +193,7 @@ export function Stage({
   onSelect,
   plateBox = null,
   speedLimitMps = null,
+  indianPlates = null,
 }: {
   frame: DisplayFrame | null;
   status: string;
@@ -206,6 +212,7 @@ export function Stage({
   onSelect?: (trackId: number | null) => void;
   plateBox?: readonly [number, number, number, number] | null;
   speedLimitMps?: number | null;
+  indianPlates?: Map<number, string> | null;
 }) {
   const canvas = useRef<HTMLCanvasElement>(null);
   const view = useRef<HTMLDivElement>(null);
@@ -222,6 +229,8 @@ export function Stage({
   plate.current = plateBox;
   const limit = useRef(speedLimitMps);
   limit.current = speedLimitMps;
+  const platesMap = useRef(indianPlates);
+  platesMap.current = indianPlates;
   const drawn = useRef<OverlayDrawBox[]>([]);
   const contentRef = useRef<ContentRect | null>(null);
   // Analysed results reach the render loop without re-rendering the page.
@@ -301,6 +310,7 @@ export function Stage({
           box.speedMps !== null && limit.current !== null
             ? box.speedMps - limit.current
             : null,
+        platesMap.current,
       );
       if (telemetry?.current)
         Object.assign(telemetry.current, {
@@ -342,6 +352,10 @@ export function Stage({
       speedUnit,
       frame.result.selectedTrackId ?? null,
       null,
+      true,
+      null,
+      () => null,
+      platesMap.current,
     );
   }, [frame, speedUnit, live]);
   return (

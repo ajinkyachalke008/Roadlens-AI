@@ -3028,6 +3028,10 @@ hr {
   margin: 2px 0 0 0;
   font-size: 24px;
   letter-spacing: -0.5px;
+  color: #0f172a;
+}
+.dossier-overlay-modal .dossier-title-group h1 {
+  color: #f8fafc;
 }
 
 .dossier-actions {

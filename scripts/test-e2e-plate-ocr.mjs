@@ -18,7 +18,8 @@ async function main() {
     viewport: { width: 1280, height: 850 },
   });
 
-  await page.goto(TARGET_URL, { waitUntil: "networkidle" });
+  await page.goto(TARGET_URL, { waitUntil: "domcontentloaded", timeout: 30000 });
+  await page.waitForSelector(".page-heading", { timeout: 15000 });
   console.log("✅ Page loaded successfully");
 
   // In-page synthetic canvas test

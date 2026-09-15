@@ -40,7 +40,8 @@ async function main() {
   });
 
   console.log(`📡 Navigating to ${TARGET_URL}...`);
-  await page.goto(TARGET_URL, { waitUntil: "networkidle", timeout: 30000 });
+  await page.goto(TARGET_URL, { waitUntil: "domcontentloaded", timeout: 30000 });
+  await page.waitForSelector(".page-heading", { timeout: 15000 });
 
   console.log(`📄 Page Title: "${await page.title()}"`);
 

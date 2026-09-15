@@ -6,6 +6,8 @@ import { displaySpeed, type SpeedUnit } from "./speedUnits";
 import { Drawer } from "./Drawer";
 import { SHOWCASE_TRIGGER_REASON } from "../showcase/constants";
 import { parseIndianPlate } from "../../../shared/src/indianPlates";
+import { ChallanModal } from "./ChallanModal";
+import { createEChallanFromReport, type EChallanNotice } from "../challan/challanGenerator";
 /**
  * One settled line of plate text for a report.
  *
@@ -102,6 +104,7 @@ export function Reports({
   speedUnit?: SpeedUnit;
 }) {
   const [selected, setSelected] = useState<string | null>(null);
+  const [selectedChallan, setSelectedChallan] = useState<EChallanNotice | null>(null);
   const [filter, setFilter] = useState("all");
   const [urls, setUrls] = useState<{
     event: string | null;
@@ -507,6 +510,19 @@ export function Reports({
           </dl>
           <div className="actions">
             <button
+              type="button"
+              className="challan-trigger-btn"
+              data-testid="generate-challan-btn"
+              onClick={() => {
+                const notice = createEChallanFromReport(report, urls);
+                setSelectedChallan(notice);
+                setSelected(null);
+              }}
+              title="Generate official Indian traffic e-Challan with photo evidence and fine calculation"
+            >
+              📄 Generate e-Challan
+            </button>
+            <button
               disabled={!reviewEnabled || pending === report.reportId}
               onClick={() => onReview(report, "noted")}
             >
@@ -523,6 +539,12 @@ export function Reports({
             <p role="status">Waiting for camera confirmation…</p>
           )}
         </Drawer>
+      )}
+      {selectedChallan && (
+        <ChallanModal
+          challan={selectedChallan}
+          onClose={() => setSelectedChallan(null)}
+        />
       )}
     </section>
   );

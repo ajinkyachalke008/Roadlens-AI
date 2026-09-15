@@ -29,6 +29,7 @@ import { OVERLAY_LIMITS } from "../camera/overlay";
 import type { FrameRateChoice } from "../camera/frameRate";
 import { Reports } from "../components/Reports";
 import { Drawer } from "../components/Drawer";
+import { AnalyticsDrawer } from "../components/AnalyticsDrawer";
 import { CalibrationDrawer } from "../components/CalibrationDrawer";
 import { calibrationQuality } from "../geometry/calibration";
 import { SpeedValidationDrawer } from "../components/SpeedValidationDrawer";
@@ -83,7 +84,7 @@ export default function Camera() {
   const [viewers, setViewers] = useState(0);
   const [remaining, setRemaining] = useState<number | null>(null);
   const [drawer, setDrawer] = useState<
-    "settings" | "calibration" | "validation" | "end" | null
+    "settings" | "calibration" | "validation" | "end" | "analytics" | null
   >(null);
   // Session-scoped, RAM-only, cleared with everything else at End session.
   const validation = useRef(new SpeedValidationSession());
@@ -348,6 +349,7 @@ export default function Camera() {
     const c = new CameraCapture(video.current!);
     capture.current = c;
     store.onChange = () => setRevision((v) => v + 1);
+    (window as any).__ROADLENS_STORE__ = store;
     store.onReport = (report) => {
       const client = relay.current;
       client?.send({
@@ -1358,6 +1360,14 @@ export default function Camera() {
           >
             {room ? "Sharing active" : sharing ? "Connecting…" : "Share camera"}
           </button>
+          <button
+            className="analytics-btn"
+            data-testid="analytics-btn"
+            onClick={() => setDrawer("analytics")}
+            title="View Traffic Flow Analytics, Vehicle Composition, and Speed Compliance"
+          >
+            📊 Analytics
+          </button>
         </div>
         <button onClick={() => setDrawer("settings")}>Settings</button>
       </div>
@@ -2133,6 +2143,12 @@ export default function Camera() {
             End and clear session
           </button>
         </Drawer>
+      )}
+      {drawer === "analytics" && (
+        <AnalyticsDrawer
+          reports={Array.from(store.reports.values())}
+          onClose={() => setDrawer(null)}
+        />
       )}
     </>
   );

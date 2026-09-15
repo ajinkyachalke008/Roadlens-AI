@@ -282,11 +282,11 @@ export function createEChallanFromReport(
     ? parseIndianPlate(plateText)
     : null;
 
-  const stateCode = parsedPlate?.stateCode ?? "MH";
-  const stateName = parsedPlate?.stateName ?? "Maharashtra";
-  const rtoCode = parsedPlate?.rtoCode ?? `${stateCode}01`;
+  const stateCode = parsedPlate?.stateCode ?? (plateText ? "IN" : "—");
+  const stateName = parsedPlate?.stateName ?? (plateText ? "All-India Transit Jurisdiction" : "Unidentified State / UT");
+  const rtoCode = parsedPlate?.rtoCode ?? "—";
   const rtoLocation =
-    parsedPlate?.rtoLocation ?? `${stateName} Transport Authority`;
+    parsedPlate?.rtoLocation ?? (parsedPlate?.stateName ? `${parsedPlate.stateName} Transport Authority` : "Unregistered / Unreadable Plate");
   const registrationNumber = parsedPlate?.formatted ?? (plateText || "UNREGISTERED / UNREADABLE");
 
   const vehicleClassInfo = getIndianVehicleCategoryName(report.className);
@@ -318,8 +318,12 @@ export function createEChallanFromReport(
     dueDateFormatted: dueDate.toLocaleString("en-IN", {
       dateStyle: "medium",
     }),
-    authorityName: `${stateName.toUpperCase()} TRAFFIC POLICE & TRANSPORT DEPT`,
-    authorityNameHi: `${stateName} यातायात पुलिस एवं परिवहन विभाग`,
+    authorityName: parsedPlate
+      ? `${stateName.toUpperCase()} TRAFFIC POLICE & TRANSPORT DEPT`
+      : "INTELLIGENT TRAFFIC ENFORCEMENT & TRANSPORT DIVISION",
+    authorityNameHi: parsedPlate
+      ? `${stateName} यातायात पुलिस एवं परिवहन विभाग`
+      : "बुद्धिमान यातायात प्रवर्तन एवं परिवहन प्रभाग",
     stateCode,
     stateName,
     rtoCode,

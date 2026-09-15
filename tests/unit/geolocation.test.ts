@@ -50,7 +50,7 @@ describe("Live GPS Geotagging & Forensic Evidence Service", () => {
     expect(DEFAULT_INDIAN_LOCATIONS.mumbai_sealink.landmark).toContain("Bandra - Worli");
   });
 
-  it("fetches geolocation with navigator fallback if permission denied or unavailable", async () => {
+  it("returns null with zero mock data if geolocation permission is denied or unavailable", async () => {
     const originalNavigator = globalThis.navigator;
 
     Object.defineProperty(globalThis, "navigator", {
@@ -66,10 +66,41 @@ describe("Live GPS Geotagging & Forensic Evidence Service", () => {
     });
 
     const location = await getCurrentGeoLocation();
-    expect(location).toBeDefined();
-    expect(location.coordinates.latitude).toBeCloseTo(18.7562);
-    expect(location.formattedDms).toContain("18°45'");
-    expect(location.landmark).toContain("Mumbai - Pune");
+    expect(location).toBeNull();
+
+    // Restore navigator
+    globalThis.navigator = originalNavigator;
+  });
+
+  it("resolves real hardware coordinates when browser geolocation permission is granted", async () => {
+    const originalNavigator = globalThis.navigator;
+
+    Object.defineProperty(globalThis, "navigator", {
+      value: {
+        geolocation: {
+          getCurrentPosition: vi.fn((success) => {
+            success({
+              coords: {
+                latitude: 19.076,
+                longitude: 72.8777,
+                accuracy: 4,
+                altitude: 12,
+              },
+              timestamp: Date.now(),
+            });
+          }),
+        },
+      } as unknown as Navigator,
+      configurable: true,
+      writable: true,
+    });
+
+    const location = await getCurrentGeoLocation();
+    expect(location).not.toBeNull();
+    expect(location?.coordinates.latitude).toBeCloseTo(19.076);
+    expect(location?.coordinates.longitude).toBeCloseTo(72.8777);
+    expect(location?.formattedDms).toContain("19°4'");
+    expect(location?.formattedDms).toContain("72°52'");
 
     // Restore navigator
     globalThis.navigator = originalNavigator;

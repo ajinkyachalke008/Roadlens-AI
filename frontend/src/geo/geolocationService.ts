@@ -91,9 +91,10 @@ export function resolveIndianHighwayLandmark(lat: number, lng: number): string {
 }
 
 /**
- * Fetches real GPS coordinates from the browser environment with fallback.
+ * Fetches real hardware GPS coordinates from the native browser geolocation API.
+ * Returns null if the user has not granted permission or device GPS is unavailable.
  */
-export async function getCurrentGeoLocation(): Promise<GeotaggedLocation> {
+export async function getCurrentGeoLocation(): Promise<GeotaggedLocation | null> {
   return new Promise((resolve) => {
     if (typeof navigator !== "undefined" && "geolocation" in navigator) {
       navigator.geolocation.getCurrentPosition(
@@ -119,37 +120,13 @@ export async function getCurrentGeoLocation(): Promise<GeotaggedLocation> {
           });
         },
         () => {
-          // Fallback on permission denied or error
-          const fallback = DEFAULT_INDIAN_LOCATIONS.pune_expressway;
-          resolve({
-            coordinates: {
-              latitude: fallback.lat,
-              longitude: fallback.lng,
-              accuracyM: 5,
-              altitude: 540,
-              timestamp: Date.now(),
-            },
-            formattedDms: formatCoordinatesDms(fallback.lat, fallback.lng),
-            landmark: fallback.landmark,
-            mapUrl: getMapUrl(fallback.lat, fallback.lng),
-          });
+          // Zero mock data: return null if permission denied or GPS hardware unavailable
+          resolve(null);
         },
-        { enableHighAccuracy: true, timeout: 5000, maximumAge: 60000 },
+        { enableHighAccuracy: true, timeout: 8000, maximumAge: 30000 },
       );
     } else {
-      const fallback = DEFAULT_INDIAN_LOCATIONS.pune_expressway;
-      resolve({
-        coordinates: {
-          latitude: fallback.lat,
-          longitude: fallback.lng,
-          accuracyM: 5,
-          altitude: 540,
-          timestamp: Date.now(),
-        },
-        formattedDms: formatCoordinatesDms(fallback.lat, fallback.lng),
-        landmark: fallback.landmark,
-        mapUrl: getMapUrl(fallback.lat, fallback.lng),
-      });
+      resolve(null);
     }
   });
 }

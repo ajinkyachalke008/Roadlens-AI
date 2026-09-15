@@ -12,7 +12,8 @@ test.describe("Live System Health & Diagnostics Drawer (HUD)", () => {
     });
     const page = await context.newPage();
 
-    await page.goto("http://127.0.0.1:5173/camera");
+    const baseUrl = process.env.ROADLENS_BASE_URL ?? "http://127.0.0.1:5173";
+    await page.goto(`${baseUrl}/camera`);
     await page.waitForLoadState("networkidle");
 
     // Click the System Health button in the header action badges
